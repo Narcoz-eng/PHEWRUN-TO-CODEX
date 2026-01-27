@@ -15,10 +15,6 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Wallet,
-  Coins,
-  ArrowUpRight,
-  ArrowDownRight,
 } from "lucide-react";
 import { MIN_LEVEL, MAX_LEVEL, formatTimeAgo, calculatePercentChange, formatMarketCap } from "@/types";
 
@@ -29,19 +25,6 @@ export interface UserStats {
   losses: number;
   winRate: number;
   totalProfitPercent: number;
-}
-
-// Wallet data interface for Web3 users
-export interface WalletData {
-  connected: boolean;
-  address?: string;
-  platformCoinHoldings?: number; // PHEW token holdings
-  totalVolumeBoughtSol?: number;
-  totalVolumeSoldSol?: number;
-  totalVolumeBoughtUsd?: number;
-  totalVolumeSoldUsd?: number;
-  balanceSol?: number;
-  balanceUsdc?: number;
 }
 
 // Simplified trade interface for recent trades display
@@ -63,7 +46,6 @@ interface ProfileDashboardProps {
   xp: number;
   stats: UserStats;
   recentTrades: RecentTrade[];
-  walletData?: WalletData;
   isLoading?: boolean;
   className?: string;
 }
@@ -140,7 +122,6 @@ export function ProfileDashboard({
   xp,
   stats,
   recentTrades,
-  walletData,
   isLoading,
   className,
 }: ProfileDashboardProps) {
@@ -327,90 +308,6 @@ export function ProfileDashboard({
           </CardContent>
         </Card>
       </div>
-
-      {/* Web3 Wallet Data - Only show if wallet is connected */}
-      {walletData?.connected && (
-        <Card className="overflow-hidden border-accent/20 bg-gradient-to-br from-accent/5 via-card to-primary/5 dark:from-accent/10 dark:via-card dark:to-primary/10">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Wallet className="h-4 w-4 text-accent" />
-              <span className="font-heading">Wallet Overview</span>
-              {walletData.address && (
-                <Badge variant="outline" className="ml-auto text-xs font-mono">
-                  {walletData.address.slice(0, 4)}...{walletData.address.slice(-4)}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Platform Coin Holdings */}
-            {walletData.platformCoinHoldings !== undefined && (
-              <div className="p-4 bg-background/50 dark:bg-background/30 rounded-lg border border-border/50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-primary" />
-                    <span className="text-sm text-muted-foreground">PHEW Holdings</span>
-                  </div>
-                  <span className="text-xl font-bold font-mono text-foreground">
-                    {walletData.platformCoinHoldings.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Volume Stats */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* Total Bought */}
-              <div className="p-3 bg-gain/5 rounded-lg border border-gain/20">
-                <div className="flex items-center gap-1.5 text-gain mb-1">
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                  <span className="text-xs uppercase tracking-wider font-medium">Bought</span>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-lg font-bold font-mono text-foreground">
-                    {walletData.totalVolumeBoughtSol?.toFixed(2) ?? "0.00"} SOL
-                  </p>
-                  <p className="text-xs text-muted-foreground font-mono">
-                    ${walletData.totalVolumeBoughtUsd?.toLocaleString() ?? "0"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Total Sold */}
-              <div className="p-3 bg-loss/5 rounded-lg border border-loss/20">
-                <div className="flex items-center gap-1.5 text-loss mb-1">
-                  <ArrowDownRight className="h-3.5 w-3.5" />
-                  <span className="text-xs uppercase tracking-wider font-medium">Sold</span>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-lg font-bold font-mono text-foreground">
-                    {walletData.totalVolumeSoldSol?.toFixed(2) ?? "0.00"} SOL
-                  </p>
-                  <p className="text-xs text-muted-foreground font-mono">
-                    ${walletData.totalVolumeSoldUsd?.toLocaleString() ?? "0"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Wallet Balances */}
-            <div className="flex items-center gap-4 pt-2 border-t border-border/50">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Balance:</span>
-                <span className="text-sm font-mono font-semibold text-foreground">
-                  {walletData.balanceSol?.toFixed(4) ?? "0"} SOL
-                </span>
-              </div>
-              <div className="h-4 w-px bg-border" />
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-mono font-semibold text-foreground">
-                  {walletData.balanceUsdc?.toFixed(2) ?? "0"} USDC
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Recent Trades (Last 5 Settled Posts) */}
       <Card>

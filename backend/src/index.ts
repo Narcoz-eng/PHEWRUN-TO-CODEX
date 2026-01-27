@@ -1,18 +1,18 @@
 import "@vibecodeapp/proxy"; // DO NOT REMOVE OTHERWISE VIBECODE PROXY WILL NOT WORK
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import "./env";
+import "./env.js";
 import {
   privyAuth,
   type AuthVariables,
-} from "./auth";
-import { prisma } from "./prisma";
-import { postsRouter } from "./routes/posts";
-import { usersRouter } from "./routes/users";
-import { adminRouter } from "./routes/admin";
-import { notificationsRouter } from "./routes/notifications";
-import { announcementsRouter } from "./routes/announcements";
-import { leaderboardRouter } from "./routes/leaderboard";
+} from "./auth.js";
+import { prisma } from "./prisma.js";
+import { postsRouter } from "./routes/posts.js";
+import { usersRouter } from "./routes/users.js";
+import { adminRouter } from "./routes/admin.js";
+import { notificationsRouter } from "./routes/notifications.js";
+import { announcementsRouter } from "./routes/announcements.js";
+import { leaderboardRouter } from "./routes/leaderboard.js";
 
 // Security middleware imports
 import {
@@ -31,7 +31,7 @@ import {
   sanitizeQuery,
   csrfProtection,
   structuredLogger,
-} from "./middleware";
+} from "./middleware.js";
 
 // =====================================================
 // Production Environment Validation
@@ -74,6 +74,7 @@ const allowed = [
   /^https:\/\/[a-z0-9-]+\.dev\.vibecode\.run$/,
   /^https:\/\/[a-z0-9-]+\.vibecode\.run$/,
   /^https:\/\/[a-z0-9-]+\.vibecodeapp\.com$/,
+  /^https:\/\/[a-z0-9-]+\.vercel\.app$/,
   /^https:\/\/phew\.run$/,
   /^https:\/\/www\.phew\.run$/,
   /^https:\/\/[a-z0-9-]+\.phew\.run$/,

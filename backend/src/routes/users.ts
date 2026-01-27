@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { prisma } from "../prisma";
-import { type AuthVariables, requireAuth } from "../auth";
-import { UpdateProfileSchema, USERNAME_UPDATE_COOLDOWN_DAYS, PHOTO_UPDATE_COOLDOWN_HOURS, ConnectWalletSchema, WALLET_CONNECT_LIMIT_PER_HOUR } from "../types";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma.js";
+import { type AuthVariables, requireAuth } from "../auth.js";
+import { UpdateProfileSchema, USERNAME_UPDATE_COOLDOWN_DAYS, PHOTO_UPDATE_COOLDOWN_HOURS, ConnectWalletSchema, WALLET_CONNECT_LIMIT_PER_HOUR } from "../types.js";
 
 export const usersRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -276,7 +277,15 @@ usersRouter.get("/:identifier", async (c) => {
   }
 
   // Get user stats (settled posts, win rate, total profit)
-  const settledPosts = await prisma.post.findMany({
+  type SettledPostRow = Prisma.PostGetPayload<{
+    select: {
+      isWin: true;
+      entryMcap: true;
+      currentMcap: true;
+    };
+  }>;
+
+  const settledPosts: SettledPostRow[] = await prisma.post.findMany({
     where: {
       authorId: user.id,
       settled: true,
@@ -289,8 +298,8 @@ usersRouter.get("/:identifier", async (c) => {
   });
 
   const totalCalls = settledPosts.length;
-  const wins = settledPosts.filter(p => p.isWin === true).length;
-  const losses = settledPosts.filter(p => p.isWin === false).length;
+  const wins = settledPosts.filter((p) => p.isWin === true).length;
+  const losses = settledPosts.filter((p) => p.isWin === false).length;
   const winRate = totalCalls > 0 ? Math.round((wins / totalCalls) * 100) : 0;
 
   // Calculate total profit/loss percentage
@@ -466,7 +475,29 @@ usersRouter.get("/:identifier/posts", async (c) => {
     return c.json({ error: { message: "User not found", code: "NOT_FOUND" } }, 404);
   }
 
-  const posts = await prisma.post.findMany({
+  type UserPostRow = Prisma.PostGetPayload<{
+    include: {
+      author: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+          level: true;
+          xp: true;
+        };
+      };
+      _count: {
+        select: {
+          likes: true;
+          comments: true;
+          reposts: true;
+        };
+      };
+    };
+  }>;
+
+  const posts: UserPostRow[] = await prisma.post.findMany({
     where: { authorId: user.id },
     orderBy: { createdAt: "desc" },
     include: {
@@ -497,7 +528,10 @@ usersRouter.get("/:identifier/posts", async (c) => {
   if (currentUser) {
     const postIds = posts.map((p) => p.id);
 
-    const [likes, reposts] = await Promise.all([
+    type LikeRow = Prisma.LikeGetPayload<{ select: { postId: true } }>;
+    type RepostRow = Prisma.RepostGetPayload<{ select: { postId: true } }>;
+
+    const [likes, reposts]: [LikeRow[], RepostRow[]] = await Promise.all([
       prisma.like.findMany({
         where: {
           userId: currentUser.id,
@@ -546,7 +580,33 @@ usersRouter.get("/:identifier/reposts", async (c) => {
   }
 
   // Get the user's reposts with the original post data
-  const reposts = await prisma.repost.findMany({
+  type RepostRow = Prisma.RepostGetPayload<{
+    include: {
+      post: {
+        include: {
+          author: {
+            select: {
+              id: true;
+              name: true;
+              username: true;
+              image: true;
+              level: true;
+              xp: true;
+            };
+          };
+          _count: {
+            select: {
+              likes: true;
+              comments: true;
+              reposts: true;
+            };
+          };
+        };
+      };
+    };
+  }>;
+
+  const reposts: RepostRow[] = await prisma.repost.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },
     include: {
@@ -582,7 +642,10 @@ usersRouter.get("/:identifier/reposts", async (c) => {
   const postIds = posts.map((p) => p.id);
 
   if (currentUser) {
-    const [likes, repostInteractions] = await Promise.all([
+    type LikeRow = Prisma.LikeGetPayload<{ select: { postId: true } }>;
+    type RepostInteractionRow = Prisma.RepostGetPayload<{ select: { postId: true } }>;
+
+    const [likes, repostInteractions]: [LikeRow[], RepostInteractionRow[]] = await Promise.all([
       prisma.like.findMany({
         where: {
           userId: currentUser.id,
@@ -708,7 +771,22 @@ usersRouter.get("/:id/followers", async (c) => {
     return c.json({ error: { message: "User not found", code: "NOT_FOUND" } }, 404);
   }
 
-  const followers = await prisma.follow.findMany({
+  type FollowerRow = Prisma.FollowGetPayload<{
+    include: {
+      follower: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+          level: true;
+          xp: true;
+        };
+      };
+    };
+  }>;
+
+  const followers: FollowerRow[] = await prisma.follow.findMany({
     where: { followingId: user.id },
     include: {
       follower: {
@@ -729,7 +807,8 @@ usersRouter.get("/:id/followers", async (c) => {
   let currentUserFollowing: Set<string> = new Set();
   if (currentUser) {
     const followerIds = followers.map((f) => f.follower.id);
-    const following = await prisma.follow.findMany({
+    type FollowingIdRow = Prisma.FollowGetPayload<{ select: { followingId: true } }>;
+    const following: FollowingIdRow[] = await prisma.follow.findMany({
       where: {
         followerId: currentUser.id,
         followingId: { in: followerIds },
@@ -766,7 +845,22 @@ usersRouter.get("/:id/following", async (c) => {
     return c.json({ error: { message: "User not found", code: "NOT_FOUND" } }, 404);
   }
 
-  const following = await prisma.follow.findMany({
+  type FollowingRow = Prisma.FollowGetPayload<{
+    include: {
+      following: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+          level: true;
+          xp: true;
+        };
+      };
+    };
+  }>;
+
+  const following: FollowingRow[] = await prisma.follow.findMany({
     where: { followerId: user.id },
     include: {
       following: {
@@ -787,7 +881,8 @@ usersRouter.get("/:id/following", async (c) => {
   let currentUserFollowing: Set<string> = new Set();
   if (currentUser) {
     const followingIds = following.map((f) => f.following.id);
-    const myFollowing = await prisma.follow.findMany({
+    type FollowingIdRow = Prisma.FollowGetPayload<{ select: { followingId: true } }>;
+    const myFollowing: FollowingIdRow[] = await prisma.follow.findMany({
       where: {
         followerId: currentUser.id,
         followingId: { in: followingIds },

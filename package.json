@@ -6,7 +6,13 @@
     "install:all": "cd backend && npm install && cd ../webapp && npm install",
     "build": "cd webapp && npm run build",
     "start": "cd backend && npm start",
-    "dev": "concurrently \"cd backend && npm run dev\" \"cd webapp && npm run dev\""
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd webapp && npm run dev\"",
+    "db:generate:postgres": "cd backend && npm run db:generate:postgres",
+    "db:push:postgres": "cd backend && npm run db:push:postgres",
+    "db:migrate:postgres": "cd backend && npm run db:migrate:postgres",
+    "db:generate:sqlite": "cd backend && npm run db:generate:sqlite",
+    "db:push:sqlite": "cd backend && npm run db:push:sqlite",
+    "db:migrate:sqlite": "cd backend && npm run db:migrate:sqlite"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

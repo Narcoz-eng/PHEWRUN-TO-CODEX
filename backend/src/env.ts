@@ -14,8 +14,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default("file:./dev.db"),
 
   // Privy Auth
-  PRIVY_APP_ID: z.string().min(1, "PRIVY_APP_ID is required"),
-  PRIVY_APP_SECRET: z.string().min(1, "PRIVY_APP_SECRET is required"),
+  PRIVY_APP_ID: z.string().optional().default(""),
+  PRIVY_APP_SECRET: z.string().optional().default(""),
 
   // Optional: Debug mode
   DEBUG: z.enum(["true", "false"]).optional().default("false"),
@@ -45,6 +45,10 @@ function validateProductionConfig(parsed: z.infer<typeof envSchema>): string[] {
     if (parsed.DEBUG === "true") {
       warnings.push("DEBUG mode is enabled in production");
     }
+
+    if (!parsed.PRIVY_APP_ID || !parsed.PRIVY_APP_SECRET) {
+      warnings.push("Privy credentials are missing. Authenticated endpoints will fail.");
+    }
   }
 
   return warnings;
@@ -61,7 +65,9 @@ function getSafeConfig(parsed: z.infer<typeof envSchema>): Record<string, string
     DATABASE_URL: parsed.DATABASE_URL.includes("file:")
       ? "SQLite (file-based)"
       : "External database",
-    PRIVY_APP_ID: `${parsed.PRIVY_APP_ID.substring(0, 8)}...`,
+    PRIVY_APP_ID: parsed.PRIVY_APP_ID
+      ? `${parsed.PRIVY_APP_ID.substring(0, 8)}...`
+      : "missing",
     DEBUG: parsed.DEBUG,
     LOG_LEVEL: parsed.LOG_LEVEL,
   };
@@ -74,6 +80,13 @@ function validateEnv() {
   try {
     const parsed = envSchema.parse(process.env);
     const warnings = validateProductionConfig(parsed);
+
+    // Ensure defaults are reflected back into process.env for downstream consumers
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof process.env[key] === "undefined") {
+        process.env[key] = value;
+      }
+    }
 
     // Log configuration on startup (without secrets)
     console.log("\n=== Environment Configuration ===");

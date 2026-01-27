@@ -22,6 +22,7 @@ const ALLOWED_ORIGIN_PATTERNS = [
   /^https:\/\/[a-z0-9-]+\.dev\.vibecode\.run$/,
   /^https:\/\/[a-z0-9-]+\.vibecode\.run$/,
   /^https:\/\/[a-z0-9-]+\.vibecodeapp\.com$/,
+  /^https:\/\/[a-z0-9-]+\.vercel\.app$/,
   /^https:\/\/phew\.run$/,
   /^https:\/\/www\.phew\.run$/,
   /^https:\/\/[a-z0-9-]+\.phew\.run$/,

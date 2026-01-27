@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { prisma } from "../prisma";
-import { type AuthVariables, requireAuth } from "../auth";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma.js";
+import { type AuthVariables, requireAuth } from "../auth.js";
 import {
   CreatePostSchema,
   CreateCommentSchema,
@@ -20,7 +21,7 @@ import {
   DAILY_REPOST_LIMIT,
   SETTLEMENT_1H_MS,
   SETTLEMENT_6H_MS,
-} from "../types";
+} from "../types.js";
 import {
   fetchMarketCap as fetchMarketCapService,
   needsMcapUpdate,
@@ -30,7 +31,7 @@ import {
   TRACKING_MODE_ACTIVE,
   TRACKING_MODE_SETTLED,
   type MarketCapResult,
-} from "../services/marketcap";
+} from "../services/marketcap.js";
 
 export const postsRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -297,12 +298,12 @@ postsRouter.get("/", async (c) => {
     : { sort: "latest" as const, following: false, limit: 50, search: undefined };
 
   // Build the where clause - use Prisma's AND/OR operators
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const whereConditions: any[] = [];
+  const whereConditions: Prisma.PostWhereInput[] = [];
 
   // If following filter is true, only show posts from followed users
   if (following && user) {
-    const followedUsers = await prisma.follow.findMany({
+    type FollowedUserRow = Prisma.FollowGetPayload<{ select: { followingId: true } }>;
+    const followedUsers: FollowedUserRow[] = await prisma.follow.findMany({
       where: { followerId: user.id },
       select: { followingId: true },
     });
@@ -358,7 +359,29 @@ postsRouter.get("/", async (c) => {
     orderByClause = { createdAt: "desc" };
   }
 
-  const posts = await prisma.post.findMany({
+  type FeedPostRow = Prisma.PostGetPayload<{
+    include: {
+      author: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+          level: true;
+          xp: true;
+        };
+      };
+      _count: {
+        select: {
+          likes: true;
+          comments: true;
+          reposts: true;
+        };
+      };
+    };
+  }>;
+
+  const posts: FeedPostRow[] = await prisma.post.findMany({
     where: whereClause,
     orderBy: orderByClause,
     take: limit,
@@ -383,6 +406,14 @@ postsRouter.get("/", async (c) => {
     },
   });
 
+  type PostWithCounts = (typeof posts)[number];
+  type PostWithSocial = PostWithCounts & {
+    isLiked: boolean;
+    isReposted: boolean;
+    isFollowingAuthor: boolean;
+  };
+  type PostWithSocialMeta = PostWithSocial & { sharedAlphaCount: number };
+
   // Get user's likes and reposts for these posts
   let userLikes: Set<string> = new Set();
   let userReposts: Set<string> = new Set();
@@ -392,7 +423,11 @@ postsRouter.get("/", async (c) => {
     const postIds = posts.map((p) => p.id);
     const authorIds = [...new Set(posts.map((p) => p.authorId))];
 
-    const [likes, reposts, follows] = await Promise.all([
+    type LikeRow = Prisma.LikeGetPayload<{ select: { postId: true } }>;
+    type RepostRow = Prisma.RepostGetPayload<{ select: { postId: true } }>;
+    type FollowRow = Prisma.FollowGetPayload<{ select: { followingId: true } }>;
+
+    const [likes, reposts, follows]: [LikeRow[], RepostRow[], FollowRow[]] = await Promise.all([
       prisma.like.findMany({
         where: {
           userId: user.id,
@@ -422,7 +457,7 @@ postsRouter.get("/", async (c) => {
   }
 
   // Map posts with social data
-  let postsWithSocial = posts.map((post) => ({
+  let postsWithSocial: PostWithSocial[] = posts.map((post) => ({
     ...post,
     isLiked: userLikes.has(post.id),
     isReposted: userReposts.has(post.id),
@@ -438,7 +473,7 @@ postsRouter.get("/", async (c) => {
       .filter((post) => new Date(post.createdAt) >= sevenDaysAgo)
       .sort((a, b) => {
         // Helper to get the best percent change (use percentChange1h, percentChange6h, or calculate from mcap)
-        const getPercentGain = (post: typeof a) => {
+        const getPercentGain = (post: PostWithSocial) => {
           // Prefer stored percentChange values if available
           if (post.percentChange6h !== null) return post.percentChange6h;
           if (post.percentChange1h !== null) return post.percentChange1h;
@@ -448,7 +483,7 @@ postsRouter.get("/", async (c) => {
         };
 
         // Helper to calculate engagement score
-        const getEngagement = (post: typeof a) => {
+        const getEngagement = (post: PostWithSocial) => {
           return (post._count.likes || 0) + (post._count.comments || 0) + (post._count.reposts || 0);
         };
 
@@ -483,9 +518,9 @@ postsRouter.get("/", async (c) => {
   // - Settled mode (>= 1 hour old): Update if lastMcapUpdate > 5 minutes ago
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
-  const postsWithUpdatedMcap = await Promise.all(
+  const postsWithUpdatedMcap: PostWithSocialMeta[] = await Promise.all(
     postsWithSocial.map(async (post) => {
-      let updatedPost = { ...post, sharedAlphaCount: 0 };
+      let updatedPost: PostWithSocialMeta = { ...post, sharedAlphaCount: 0 };
 
       // Update current mcap based on tracking mode
       // Also update token metadata if missing (for older posts created before this feature)
@@ -682,7 +717,8 @@ postsRouter.post("/", requireAuth, zValidator("json", CreatePostSchema), async (
   });
 
   // Create notifications for all followers
-  const followers = await prisma.follow.findMany({
+  type NotificationFollowerRow = Prisma.FollowGetPayload<{ select: { followerId: true } }>;
+  const followers: NotificationFollowerRow[] = await prisma.follow.findMany({
     where: { followingId: user.id },
     select: { followerId: true },
   });
@@ -906,7 +942,7 @@ postsRouter.post("/settle", async (c) => {
     data: {
       settled1h: results1h.length,
       snapshot6h: results6h.length,
-      levelChanges6h: results6h.filter(r => r.hadLevelChange).length,
+      levelChanges6h: results6h.filter((r) => r.hadLevelChange).length,
       results1h,
       results6h,
     }
@@ -965,6 +1001,9 @@ postsRouter.get("/trending", async (c) => {
     percentGains: number[]; // Track percent gains for each call
     winCount: number; // Track number of winning calls
   }>();
+
+  type TrendingTokenStats = (typeof addressMap extends Map<string, infer V> ? V : never);
+  type TrendingCaller = TrendingTokenStats["callers"] extends Map<string, infer V> ? V : never;
 
   for (const post of recentPosts) {
     if (!post.contractAddress) continue;
@@ -1567,7 +1606,22 @@ postsRouter.get("/:id/reposters", async (c) => {
     return c.json({ error: { message: "Post not found", code: "NOT_FOUND" } }, 404);
   }
 
-  const reposts = await prisma.repost.findMany({
+  type RepostUserRow = Prisma.RepostGetPayload<{
+    include: {
+      user: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+          level: true;
+          xp: true;
+        };
+      };
+    };
+  }>;
+
+  const reposts: RepostUserRow[] = await prisma.repost.findMany({
     where: { postId },
     orderBy: { createdAt: "desc" },
     include: {
@@ -1615,7 +1669,22 @@ postsRouter.get("/:id/shared-alpha", async (c) => {
   // Find other posts with same CA within 48 hours
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
-  const sharedPosts = await prisma.post.findMany({
+  type SharedPostRow = Prisma.PostGetPayload<{
+    include: {
+      author: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+          level: true;
+          xp: true;
+        };
+      };
+    };
+  }>;
+
+  const sharedPosts: SharedPostRow[] = await prisma.post.findMany({
     where: {
       contractAddress: post.contractAddress,
       id: { not: post.id },
@@ -1724,4 +1793,3 @@ postsRouter.get("/:id/price", async (c) => {
     },
   });
 });
-

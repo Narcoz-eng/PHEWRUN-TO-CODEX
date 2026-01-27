@@ -13,4 +13,4 @@ export {
   getPrivyClient,
   type PrivyUser,
   type AuthVariables,
-} from "./middleware/auth";
+} from "./middleware/auth.js";

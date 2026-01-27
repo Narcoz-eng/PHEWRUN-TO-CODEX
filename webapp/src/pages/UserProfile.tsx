@@ -8,7 +8,7 @@ import { LevelBadge } from "@/components/feed/LevelBar";
 import { getLevelLabel, isInDangerZone, getDangerMessage } from "@/lib/level-utils";
 import { PostCard } from "@/components/feed/PostCard";
 import { PostCardSkeleton } from "@/components/feed/PostCardSkeleton";
-import { ProfileDashboard, UserStats, RecentTrade, WalletData } from "@/components/profile/ProfileDashboard";
+import { ProfileDashboard, UserStats, RecentTrade } from "@/components/profile/ProfileDashboard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,8 +16,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ArrowLeft,
   Calendar,
-  Wallet,
-  Mail,
   TrendingUp,
   TrendingDown,
   UserPlus,
@@ -26,8 +24,6 @@ import {
   Sparkles,
   AlertCircle,
   Repeat2,
-  Copy,
-  Check,
   AlertTriangle,
   Skull,
 } from "lucide-react";
@@ -39,7 +35,6 @@ interface UserProfileData {
   name: string;
   email: string | null;
   image: string | null;
-  walletAddress: string | null;
   username: string | null;
   level: number;
   xp: number;
@@ -70,7 +65,6 @@ export default function UserProfile() {
   const queryClient = useQueryClient();
   const [mainTab, setMainTab] = useState<MainTab>("posts");
   const [postFilter, setPostFilter] = useState<PostFilter>("all");
-  const [walletCopied, setWalletCopied] = useState(false);
 
   // Fetch user profile
   const {
@@ -262,11 +256,6 @@ export default function UserProfile() {
     });
   };
 
-  // Truncate wallet address
-  const truncateAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
-
   // Check if this is current user's profile
   const isOwnProfile = session?.user?.id === userId;
 
@@ -413,33 +402,6 @@ export default function UserProfile() {
 
               {/* Info badges */}
               <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                {user.walletAddress && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(user.walletAddress!);
-                        setWalletCopied(true);
-                        toast.success("Address copied to clipboard");
-                        setTimeout(() => setWalletCopied(false), 2000);
-                      } catch {
-                        toast.error("Failed to copy address");
-                      }
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-full text-xs text-muted-foreground transition-colors cursor-pointer group"
-                    title="Click to copy address"
-                  >
-                    <Wallet className="h-3.5 w-3.5" />
-                    <span className="font-mono">
-                      {truncateAddress(user.walletAddress)}
-                    </span>
-                    {walletCopied ? (
-                      <Check className="h-3 w-3 text-gain" />
-                    ) : (
-                      <Copy className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    )}
-                  </button>
-                )}
-
                 <div className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary rounded-full text-xs text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5" />
                   <span>Joined {formatJoinDate(user.createdAt)}</span>
@@ -453,18 +415,6 @@ export default function UserProfile() {
               xp={user.xp ?? 0}
               stats={userStats}
               recentTrades={recentTrades}
-              walletData={user.walletAddress ? {
-                connected: true,
-                address: user.walletAddress,
-                // Note: These values would come from a Web3 API integration
-                platformCoinHoldings: undefined,
-                totalVolumeBoughtSol: undefined,
-                totalVolumeSoldSol: undefined,
-                totalVolumeBoughtUsd: undefined,
-                totalVolumeSoldUsd: undefined,
-                balanceSol: undefined,
-                balanceUsdc: undefined,
-              } : undefined}
               isLoading={isLoadingPosts}
             />
 

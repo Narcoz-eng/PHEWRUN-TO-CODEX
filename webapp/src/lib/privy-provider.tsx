@@ -58,7 +58,7 @@ export function PrivyProvider({ children }: PrivyProviderProps) {
     <BasePrivyProvider
       appId={appId}
       config={{
-        loginMethods: ["email", "wallet"],
+        loginMethods: ["email", "google", "twitter", "discord"],
         appearance: {
           theme: "dark",
           accentColor: "#3b82f6",

@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { prisma } from "../prisma";
-import { type AuthVariables } from "../auth";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma.js";
+import { type AuthVariables } from "../auth.js";
 import {
   LeaderboardQuerySchema,
   MIN_LEVEL,
   MAX_LEVEL,
-} from "../types";
+} from "../types.js";
 
 export const leaderboardRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -19,7 +20,20 @@ leaderboardRouter.get("/daily-gainers", async (c) => {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
   // Find settled posts from last 24 hours with positive gains
-  const posts = await prisma.post.findMany({
+  type DailyGainerPost = Prisma.PostGetPayload<{
+    include: {
+      author: {
+        select: {
+          id: true;
+          username: true;
+          image: true;
+          level: true;
+        };
+      };
+    };
+  }>;
+
+  const posts: DailyGainerPost[] = await prisma.post.findMany({
     where: {
       settled: true,
       createdAt: { gte: twentyFourHoursAgo },
@@ -41,8 +55,13 @@ leaderboardRouter.get("/daily-gainers", async (c) => {
   });
 
   // Calculate gain percent and filter for positive gains
+  type DailyGainerItem = {
+    post: DailyGainerPost;
+    gainPercent: number;
+  };
+
   const postsWithGains = posts
-    .map((post) => {
+    .map((post): DailyGainerItem | null => {
       if (!post.entryMcap || !post.currentMcap) return null;
 
       // Use whichever percent change is higher (1h or 6h)
@@ -63,7 +82,7 @@ leaderboardRouter.get("/daily-gainers", async (c) => {
         gainPercent,
       };
     })
-    .filter((item): item is NonNullable<typeof item> =>
+    .filter((item): item is DailyGainerItem =>
       item !== null && item.gainPercent > 0
     )
     .sort((a, b) => b.gainPercent - a.gainPercent)
@@ -116,7 +135,9 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
   // For activity sorting, we need a different approach - get users with recent post counts
   if (sortBy === 'activity') {
     // Get users who posted in the last 7 days, ordered by post count
-    const recentPostsByUser = await prisma.post.groupBy({
+    type RecentPostsByUser = Prisma.PostGroupByOutputType;
+
+    const recentPostsByUser: RecentPostsByUser[] = await prisma.post.groupBy({
       by: ['authorId'],
       where: {
         createdAt: { gte: sevenDaysAgo },
@@ -130,7 +151,21 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
     const userIds = recentPostsByUser.map((p) => p.authorId);
 
     // Get user details
-    const usersDetails = await prisma.user.findMany({
+    type ActivityUserRow = Prisma.UserGetPayload<{
+      select: {
+        id: true;
+        username: true;
+        name: true;
+        image: true;
+        level: true;
+        xp: true;
+        _count: {
+          select: { posts: true };
+        };
+      };
+    }>;
+
+    const usersDetails: ActivityUserRow[] = await prisma.user.findMany({
       where: { id: { in: userIds } },
       select: {
         id: true,
@@ -147,44 +182,48 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
 
     // Get win/loss stats for each user
     const usersWithStats = await Promise.all(
-      recentPostsByUser.map(async (recentPost, index) => {
-        const user = usersDetails.find((u) => u.id === recentPost.authorId);
-        if (!user) return null;
+      recentPostsByUser.map(
+        async (recentPost, index) => {
+          const user = usersDetails.find((u) => u.id === recentPost.authorId);
+          if (!user) return null;
 
-        const [wins, losses] = await Promise.all([
-          prisma.post.count({
-            where: { authorId: user.id, settled: true, isWin: true },
-          }),
-          prisma.post.count({
-            where: { authorId: user.id, settled: true, isWin: false },
-          }),
-        ]);
+          const [wins, losses] = await Promise.all([
+            prisma.post.count({
+              where: { authorId: user.id, settled: true, isWin: true },
+            }),
+            prisma.post.count({
+              where: { authorId: user.id, settled: true, isWin: false },
+            }),
+          ]);
 
-        const totalSettled = wins + losses;
-        const winRate = totalSettled > 0 ? (wins / totalSettled) * 100 : 0;
+          const totalSettled = wins + losses;
+          const winRate = totalSettled > 0 ? (wins / totalSettled) * 100 : 0;
 
-        return {
-          rank: skip + index + 1,
-          user: {
-            id: user.id,
-            username: user.username,
-            name: user.name,
-            image: user.image,
-            level: user.level,
-            xp: user.xp,
-          },
-          stats: {
-            totalAlphas: user._count.posts,
-            recentAlphas: recentPost._count.id,
-            wins,
-            losses,
-            winRate: Math.round(winRate * 100) / 100,
-          },
-        };
-      })
+          return {
+            rank: skip + index + 1,
+            user: {
+              id: user.id,
+              username: user.username,
+              name: user.name,
+              image: user.image,
+              level: user.level,
+              xp: user.xp,
+            },
+            stats: {
+              totalAlphas: user._count.posts,
+              recentAlphas: recentPost._count.id,
+              wins,
+              losses,
+              winRate: Math.round(winRate * 100) / 100,
+            },
+          };
+        }
+      )
     );
 
-    const filteredUsers = usersWithStats.filter((u): u is NonNullable<typeof u> => u !== null);
+    const filteredUsers = usersWithStats.filter(
+      (u): u is NonNullable<(typeof usersWithStats)[number]> => u !== null
+    );
 
     // Count total active users for pagination
     const totalActiveUsers = await prisma.post.groupBy({
@@ -206,7 +245,21 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
   if (sortBy === 'winrate') {
     // For win rate, we need to get all users with enough posts and calculate win rates
     // First get all users with at least MIN_POSTS_FOR_WINRATE settled posts
-    const usersWithSettledPosts = await prisma.user.findMany({
+    type SettledUserRow = Prisma.UserGetPayload<{
+      select: {
+        id: true;
+        username: true;
+        name: true;
+        image: true;
+        level: true;
+        xp: true;
+        _count: {
+          select: { posts: true };
+        };
+      };
+    }>;
+
+    const usersWithSettledPosts: SettledUserRow[] = await prisma.user.findMany({
       where: {
         posts: {
           some: { settled: true },
@@ -262,7 +315,9 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
 
     // Filter users with minimum posts and sort by win rate
     const qualifiedUsers = usersWithWinRates
-      .filter((u) => u.stats.totalSettled >= MIN_POSTS_FOR_WINRATE)
+      .filter(
+        (u) => u.stats.totalSettled >= MIN_POSTS_FOR_WINRATE
+      )
       .sort((a, b) => {
         if (b.stats.winRate !== a.stats.winRate) {
           return b.stats.winRate - a.stats.winRate;
@@ -274,16 +329,18 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
     const totalQualified = qualifiedUsers.length;
     const paginatedUsers = qualifiedUsers.slice(skip, skip + limit);
 
-    const result = paginatedUsers.map((u, index) => ({
-      rank: skip + index + 1,
-      user: u.user,
-      stats: {
-        totalAlphas: u.stats.totalAlphas,
-        wins: u.stats.wins,
-        losses: u.stats.losses,
-        winRate: u.stats.winRate,
-      },
-    }));
+    const result = paginatedUsers.map(
+      (u, index) => ({
+        rank: skip + index + 1,
+        user: u.user,
+        stats: {
+          totalAlphas: u.stats.totalAlphas,
+          wins: u.stats.wins,
+          losses: u.stats.losses,
+          winRate: u.stats.winRate,
+        },
+      })
+    );
 
     return c.json({
       data: result,
@@ -298,7 +355,23 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
 
   // Default: sortBy === 'level'
   // Get users with their post stats
-  const users = await prisma.user.findMany({
+  type LevelUserRow = Prisma.UserGetPayload<{
+    select: {
+      id: true;
+      username: true;
+      name: true;
+      image: true;
+      level: true;
+      xp: true;
+      _count: {
+        select: {
+          posts: true;
+        };
+      };
+    };
+  }>;
+
+  const users: LevelUserRow[] = await prisma.user.findMany({
     where: {
       posts: {
         some: {},
@@ -370,12 +443,14 @@ leaderboardRouter.get("/top-users", zValidator("query", LeaderboardQuerySchema),
   );
 
   // Sort by level first, then by win rate for tie-breaking
-  usersWithStats.sort((a, b) => {
-    if (b.user.level !== a.user.level) {
-      return b.user.level - a.user.level;
+  usersWithStats.sort(
+    (a, b) => {
+      if (b.user.level !== a.user.level) {
+        return b.user.level - a.user.level;
+      }
+      return b.stats.winRate - a.stats.winRate;
     }
-    return b.stats.winRate - a.stats.winRate;
-  });
+  );
 
   // Re-assign ranks after sorting
   usersWithStats.forEach((user, index) => {
@@ -502,7 +577,8 @@ leaderboardRouter.get("/stats", async (c) => {
   ]);
 
   // Get user details for top users this week
-  const topUserIds = topUsersThisWeek.map((u) => u.authorId);
+  type TopUsersByWeek = Prisma.PostGroupByOutputType;
+  const topUserIds = (topUsersThisWeek as TopUsersByWeek[]).map((u) => u.authorId);
   const topUserDetails = await prisma.user.findMany({
     where: { id: { in: topUserIds } },
     select: {
@@ -513,16 +589,29 @@ leaderboardRouter.get("/stats", async (c) => {
     },
   });
 
-  const topUsersWithDetails = topUsersThisWeek.map((tu) => {
-    const userDetail = topUserDetails.find((u) => u.id === tu.authorId);
-    return {
-      id: tu.authorId,
-      username: userDetail?.username ?? null,
-      image: userDetail?.image ?? null,
-      level: userDetail?.level ?? 0,
-      postsThisWeek: tu._count.id,
+  type TopUserRow = Prisma.UserGetPayload<{
+    select: {
+      id: true;
+      username: true;
+      image: true;
+      level: true;
     };
-  });
+  }>;
+
+  const topUsersWithDetails = (topUsersThisWeek as TopUsersByWeek[]).map(
+    (tu) => {
+      const userDetail = (topUserDetails as TopUserRow[]).find(
+        (u) => u.id === tu.authorId
+      );
+      return {
+        id: tu.authorId,
+        username: userDetail?.username ?? null,
+        image: userDetail?.image ?? null,
+        level: userDetail?.level ?? 0,
+        postsThisWeek: tu._count.id,
+      };
+    }
+  );
 
   // Calculate avg win rate
   const totalSettled = totalWins + totalLosses;
@@ -530,7 +619,7 @@ leaderboardRouter.get("/stats", async (c) => {
 
   // Format level distribution (ensure all levels from -5 to 10 are represented)
   const levelDistMap = new Map<number, number>();
-  levelDistribution.forEach((ld) => {
+  levelDistribution.forEach((ld: (typeof levelDistribution)[number]) => {
     levelDistMap.set(ld.level, ld._count.level);
   });
 

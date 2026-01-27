@@ -7,7 +7,6 @@ export { usePrivy } from "@privy-io/react-auth";
 export interface PrivyAuthUser {
   id: string;
   email: string | null;
-  walletAddress: string | null;
   linkedAccounts: {
     type: string;
     address?: string;
@@ -41,14 +40,6 @@ export function usePrivyAuth(): PrivyAuthState {
         ? String(emailAccount.email ?? "")
         : null;
 
-    let walletAddress: string | null = null;
-    for (const account of user.linkedAccounts) {
-      if ("address" in account && account.address) {
-        walletAddress = String(account.address);
-        break;
-      }
-    }
-
     const linkedAccounts = user.linkedAccounts.map((account) => ({
       type: account.type,
       address: "address" in account ? String(account.address) : undefined,
@@ -58,7 +49,6 @@ export function usePrivyAuth(): PrivyAuthState {
     return {
       id: user.id,
       email: email || null,
-      walletAddress,
       linkedAccounts,
     };
   }, [user]);

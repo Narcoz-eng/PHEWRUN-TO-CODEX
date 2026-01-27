@@ -1,4 +1,9 @@
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
+import type {
+  LogEvent,
+  LogLevel,
+  QueryEvent,
+} from "@prisma/client/runtime/library";
 
 /**
  * Database Configuration
@@ -16,7 +21,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 const isProduction = process.env.NODE_ENV === "production";
 
 // In production, only log warnings and errors. In development, log queries too.
-const logConfig: Prisma.LogLevel[] = isProduction
+const logConfig: LogLevel[] = isProduction
   ? ["warn", "error"]
   : ["query", "warn", "error"];
 
@@ -30,7 +35,7 @@ const prisma = new PrismaClient({
 // Log slow queries in production (queries taking > 1 second)
 const SLOW_QUERY_THRESHOLD_MS = 1000;
 
-prisma.$on("query", (e: Prisma.QueryEvent) => {
+prisma.$on("query", (e: QueryEvent) => {
   if (isProduction) {
     // In production, only log slow queries
     if (e.duration > SLOW_QUERY_THRESHOLD_MS) {
@@ -51,16 +56,16 @@ prisma.$on("query", (e: Prisma.QueryEvent) => {
 });
 
 // Log warnings
-prisma.$on("warn", (e: Prisma.LogEvent) => {
+prisma.$on("warn", (e: LogEvent) => {
   console.warn(`[Prisma Warning] ${e.message}`);
 });
 
 // Log errors
-prisma.$on("error", (e: Prisma.LogEvent) => {
+prisma.$on("error", (e: LogEvent) => {
   console.error(`[Prisma Error] ${e.message}`);
 });
 
-// IMPORTANT: SQLite optimizations for better performance
+// IMPORTANT: SQLite optimizations for better performance (only when using SQLite)
 async function initSqlitePragmas(prisma: PrismaClient) {
   await prisma.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
   await prisma.$queryRawUnsafe("PRAGMA foreign_keys = ON;");
@@ -68,6 +73,11 @@ async function initSqlitePragmas(prisma: PrismaClient) {
   await prisma.$queryRawUnsafe("PRAGMA synchronous = NORMAL;");
 }
 
-initSqlitePragmas(prisma);
+const databaseUrl = process.env.DATABASE_URL ?? "";
+if (databaseUrl.startsWith("file:")) {
+  initSqlitePragmas(prisma).catch((error) => {
+    console.error("[Prisma] Failed to apply SQLite pragmas:", error);
+  });
+}
 
 export { prisma };

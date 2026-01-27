@@ -8,8 +8,8 @@ import { LevelBadge, LevelBar } from "@/components/feed/LevelBar";
 import { getLevelLabel, isInDangerZone, getDangerMessage } from "@/lib/level-utils";
 import { PostCard } from "@/components/feed/PostCard";
 import { PostCardSkeleton } from "@/components/feed/PostCardSkeleton";
-import { ProfileDashboard, UserStats, RecentTrade, WalletData } from "@/components/profile/ProfileDashboard";
-import { WalletConnection } from "@/components/profile/WalletConnection";
+import { ProfileDashboard, UserStats, RecentTrade } from "@/components/profile/ProfileDashboard";
+import { OAuthConnections } from "@/components/profile/OAuthConnections";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,6 @@ import {
   ArrowLeft,
   Camera,
   Calendar,
-  Wallet,
   Mail,
   TrendingUp,
   TrendingDown,
@@ -325,11 +324,6 @@ export default function Profile() {
     });
   };
 
-  // Truncate wallet address
-  const truncateAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
-
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -511,15 +505,6 @@ export default function Profile() {
 
               {/* Info badges */}
               <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                {user.walletAddress && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary rounded-full text-xs text-muted-foreground">
-                    <Wallet className="h-3.5 w-3.5" />
-                    <span className="font-mono">
-                      {truncateAddress(user.walletAddress)}
-                    </span>
-                  </div>
-                )}
-
                 {user.email && (
                   <div className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary rounded-full text-xs text-muted-foreground">
                     <Mail className="h-3.5 w-3.5" />
@@ -540,24 +525,11 @@ export default function Profile() {
               xp={user.xp ?? 0}
               stats={userStats}
               recentTrades={recentTrades}
-              walletData={user.walletAddress ? {
-                connected: true,
-                address: user.walletAddress,
-                // Note: These values would come from a Web3 API integration
-                // For now, showing placeholder structure for when API is connected
-                platformCoinHoldings: undefined,
-                totalVolumeBoughtSol: undefined,
-                totalVolumeSoldSol: undefined,
-                totalVolumeBoughtUsd: undefined,
-                totalVolumeSoldUsd: undefined,
-                balanceSol: undefined,
-                balanceUsdc: undefined,
-              } : undefined}
               isLoading={isLoadingPosts}
             />
 
-            {/* Wallet Connection Section */}
-            <WalletConnection />
+            {/* OAuth Connection Section */}
+            <OAuthConnections />
 
             {/* Followers/Following */}
             <div className="flex items-center justify-center gap-6 py-3">

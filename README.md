@@ -273,11 +273,219 @@ VITE_PRIVY_APP_ID=your-privy-app-id
 
 ### Backend (.env)
 ```
+DATABASE_URL=postgresql://postgres:<YOUR_PASSWORD>@db.<YOUR_PROJECT_REF>.supabase.co:5432/postgres
+PRIVY_APP_ID=your-privy-app-id
+PRIVY_APP_SECRET=your-privy-app-secret
+NODE_ENV=development
+```
+For local SQLite, set `DATABASE_URL=file:./dev.db` and use the SQLite scripts below.
+
+## Database Setup (Step-by-Step)
+
+### Option A: Supabase (PostgreSQL) — Recommended for deployments
+This is the default Prisma schema for production builds.
+
+1) **Create a Supabase project**
+   - Go to **Supabase Dashboard → Project → Settings → Database**.
+   - Copy the **Connection string (URI)**.
+
+2) **Set the backend `DATABASE_URL`**
+```
+DATABASE_URL=postgresql://postgres:<YOUR_PASSWORD>@db.<YOUR_PROJECT_REF>.supabase.co:5432/postgres
+PRIVY_APP_ID=your-privy-app-id
+PRIVY_APP_SECRET=your-privy-app-secret
+NODE_ENV=development
+```
+
+3) **Generate + push the PostgreSQL Prisma schema**
+```bash
+cd backend
+npm run db:generate:postgres
+npm run db:push:postgres
+```
+
+If Supabase logs show something like:
+```
+connection authenticated: identity="supabase_admin" method=scram-sha-256
+```
+that only means the connection succeeded — you still need to run `db:push:postgres` to create tables.
+
+After `db:push:postgres`, verify tables in **Supabase → Table Editor**.
+
+4) **Start the backend**
+```bash
+npm run dev
+```
+
+5) **Point the frontend at the backend**
+```
+VITE_BACKEND_URL=http://localhost:3000
+```
+
+> Note: This repo includes a PostgreSQL Prisma schema at `backend/prisma/schema.postgres.prisma` for Supabase.
+
+### Option B: Local SQLite (dev-only, no hosted DB)
+Use this if you want a local database while developing.
+
+1) **Create your backend env**
+```
 DATABASE_URL=file:./dev.db
 PRIVY_APP_ID=your-privy-app-id
 PRIVY_APP_SECRET=your-privy-app-secret
 NODE_ENV=development
 ```
+
+2) **Generate and push the SQLite schema**
+```bash
+cd backend
+npm run db:generate:sqlite
+npm run db:push:sqlite
+```
+
+3) **Start the backend**
+```bash
+npm run dev
+```
+
+4) **Point the frontend at the backend**
+```
+VITE_BACKEND_URL=http://localhost:3000
+```
+
+If the UI says “Failed to fetch” or “Failed to load posts,” it usually means the backend is not running or `VITE_BACKEND_URL` points to the wrong place.
+
+### If `npm run` doesn't show `db:generate:postgres`
+If `npm run` only shows `db:generate` / `db:push`, your local checkout is missing the latest scripts.
+
+1) **Pull the latest code**
+```bash
+git pull origin main
+```
+
+2) **Try the scripts again**
+```bash
+cd backend
+npm run db:generate:postgres
+npm run db:push:postgres
+```
+
+You can also run the same commands from the repo root:
+
+```bash
+npm run db:generate:postgres
+npm run db:push:postgres
+```
+
+If you still don't see the scripts, run Prisma directly with the Postgres schema:
+
+```bash
+cd backend
+npx prisma@6 generate --schema ./prisma/schema.postgres.prisma
+npx prisma@6 db push --schema ./prisma/schema.postgres.prisma
+```
+
+If you get **"file or directory not found"** for the schema path, check that the file exists:
+
+```bash
+cd backend
+ls prisma
+```
+
+You should see `schema.postgres.prisma`. If you don't, pull the latest code:
+
+```bash
+git pull origin main
+```
+
+If you prefer to run the Prisma commands from the repo root, use the full path:
+
+```bash
+npx prisma@6 generate --schema ./backend/prisma/schema.postgres.prisma
+npx prisma@6 db push --schema ./backend/prisma/schema.postgres.prisma
+```
+
+## Troubleshooting (Prisma P1012 / Prisma 7 error)
+
+If you see this error:
+
+```
+Error: Prisma schema validation (P1012)
+The datasource property `url` is no longer supported in schema files...
+Prisma CLI Version: 7.x
+```
+
+It means a **global Prisma 7 CLI** is being used. This repo is pinned to **Prisma 6**.  
+Use the project scripts (they force Prisma 6) instead of a global Prisma:
+
+```bash
+cd backend
+npm run db:generate
+npm run db:push
+```
+
+If you are using local SQLite, run:
+
+```bash
+npm run db:generate:sqlite
+npm run db:push:sqlite
+```
+
+If you must run Prisma manually, use:
+
+```bash
+npx prisma@6 generate
+```
+
+## Backend URL vs Supabase URL (quick sanity check)
+
+- **Backend URL** = where your API is running (example: `https://phewrun-to-codex.vercel.app`)  
+  → put this in `webapp/.env` as `VITE_BACKEND_URL`.
+
+- **Supabase project URL** (example: `https://fkyehqefcqgnxwfpopnn.supabase.co`)  
+  → **not** used as `VITE_BACKEND_URL`.  
+  → only used to build your **DATABASE_URL** connection string for Prisma.
+
+## Redeploy Checklist (Vercel + Supabase)
+
+1) **Set Vercel env vars (Backend)**
+```
+DATABASE_URL=postgresql://postgres:<YOUR_PASSWORD>@db.fkyehqefcqgnxwfpopnn.supabase.co:5432/postgres
+PRIVY_APP_ID=your-privy-app-id
+PRIVY_APP_SECRET=your-privy-app-secret
+NODE_ENV=production
+BACKEND_URL=https://phewrun-to-codex.vercel.app
+```
+
+2) **Set Vercel env vars (Frontend)**
+```
+VITE_BACKEND_URL=https://phewrun-to-codex.vercel.app
+VITE_PRIVY_APP_ID=your-privy-app-id
+```
+
+3) **Apply the Prisma schema to Supabase**
+```bash
+cd backend
+npm run db:generate:postgres
+npm run db:push:postgres
+```
+
+4) **Trigger a Vercel redeploy**
+If you changed only environment variables, use **Vercel → Deployments → Redeploy**.  
+If you need a Git-triggered deploy, make a tiny commit and push:
+
+```bash
+git status -sb
+git add .
+git commit -m "Trigger redeploy"
+git push origin main
+```
+
+5) **Verify the backend and posts API**
+Open these URLs in your browser:
+- `https://phewrun-to-codex.vercel.app/api/health`
+- `https://phewrun-to-codex.vercel.app/api/posts`
+
+If `/api/posts` returns a 500 error, the database schema is not applied or the `DATABASE_URL` is incorrect.
 
 ## Security Features
 

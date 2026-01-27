@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import { prisma } from "../prisma";
-import { type AuthVariables, requireAuth } from "../auth";
-import { type Announcement } from "../types";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma.js";
+import { type AuthVariables, requireAuth } from "../auth.js";
+import { type Announcement } from "../types.js";
 
 // Public announcement routes for feed display and view tracking
 export const announcementsRouter = new Hono<{ Variables: AuthVariables }>();
@@ -14,7 +15,25 @@ announcementsRouter.get("/", async (c) => {
   const user = c.get("user");
 
   // Get pinned announcements (or all if no pinned ones exist, limited to recent)
-  const announcements = await prisma.announcement.findMany({
+  type AnnouncementRow = Prisma.AnnouncementGetPayload<{
+    include: {
+      author: {
+        select: {
+          id: true;
+          name: true;
+          username: true;
+          image: true;
+        };
+      };
+      _count: {
+        select: {
+          views: true;
+        };
+      };
+    };
+  }>;
+
+  const announcements: AnnouncementRow[] = await prisma.announcement.findMany({
     where: { isPinned: true },
     orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
     take: 10,
@@ -38,10 +57,16 @@ announcementsRouter.get("/", async (c) => {
   // If user is authenticated, get their viewed announcements
   let viewedIds: Set<string> = new Set();
   if (user) {
-    const views = await prisma.announcementView.findMany({
+    type AnnouncementViewRow = Prisma.AnnouncementViewGetPayload<{
+      select: { announcementId: true };
+    }>;
+
+    const views: AnnouncementViewRow[] = await prisma.announcementView.findMany({
       where: {
         userId: user.id,
-        announcementId: { in: announcements.map((a) => a.id) },
+        announcementId: {
+          in: announcements.map((a) => a.id),
+        },
       },
       select: { announcementId: true },
     });

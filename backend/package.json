@@ -3,15 +3,25 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "prisma": {
+    "schema": "prisma/schema.postgres.prisma"
+  },
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "start": "bunx prisma generate && bunx prisma migrate deploy && bun run src/index.ts",
-    "build": "bunx prisma generate",
+    "start": "bunx prisma@6 generate && bunx prisma@6 migrate deploy && bun run src/index.ts",
+    "build": "bunx prisma@6 generate",
+    "postinstall": "bunx prisma@6 generate",
     "studio:up": "cloud-studio --port 3001 --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "db:push": "bunx prisma db push",
-    "db:migrate": "bunx prisma migrate deploy",
-    "db:generate": "bunx prisma generate"
+    "db:push": "bunx prisma@6 db push",
+    "db:migrate": "bunx prisma@6 migrate deploy",
+    "db:generate": "bunx prisma@6 generate",
+    "db:push:sqlite": "bunx prisma@6 db push --schema ./prisma/schema.prisma",
+    "db:migrate:sqlite": "bunx prisma@6 migrate deploy --schema ./prisma/schema.prisma",
+    "db:generate:sqlite": "bunx prisma@6 generate --schema ./prisma/schema.prisma",
+    "db:push:postgres": "bunx prisma@6 db push --schema ./prisma/schema.postgres.prisma",
+    "db:migrate:postgres": "bunx prisma@6 migrate deploy --schema ./prisma/schema.postgres.prisma",
+    "db:generate:postgres": "bunx prisma@6 generate --schema ./prisma/schema.postgres.prisma"
   },
   "devDependencies": {
     "@types/bun": "latest",

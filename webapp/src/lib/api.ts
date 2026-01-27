@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+const API_BASE_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 
 // Default timeout for requests (30 seconds)
 const DEFAULT_TIMEOUT = 30000;

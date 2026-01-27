@@ -13,7 +13,7 @@ export {
   getPrivyClient,
   type PrivyUser,
   type AuthVariables,
-} from "./auth";
+} from "./auth.js";
 
 // Rate limiting
 export {
@@ -32,7 +32,7 @@ export {
   stopRateLimitCleanup,
   clearRateLimitStore,
   type RateLimitConfig,
-} from "./rateLimit";
+} from "./rateLimit.js";
 
 // Input sanitization
 export {
@@ -48,7 +48,7 @@ export {
   safeString,
   sanitizeUrl,
   sanitizeWalletAddress,
-} from "./sanitize";
+} from "./sanitize.js";
 
 // Security headers
 export {
@@ -59,7 +59,7 @@ export {
   logProductionStatus,
   timingSafeEqual,
   type SecurityHeadersConfig,
-} from "./security";
+} from "./security.js";
 
 // Error handling
 export {
@@ -69,7 +69,7 @@ export {
   ERROR_CODES,
   type ErrorCode,
   type ErrorResponse,
-} from "./errorHandler";
+} from "./errorHandler.js";
 
 // Structured logging
 export {
@@ -78,7 +78,7 @@ export {
   developmentLogger,
   type LogEntry,
   type StructuredLoggerConfig,
-} from "./logger";
+} from "./logger.js";
 
 // CSRF Protection
 export {
@@ -87,4 +87,4 @@ export {
   developmentCookieSettings,
   getCookieSettings,
   type CsrfConfig,
-} from "./csrf";
+} from "./csrf.js";

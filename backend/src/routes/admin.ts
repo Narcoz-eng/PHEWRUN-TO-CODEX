@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { zValidator } from "@hono/zod-validator";
-import { prisma } from "../prisma";
-import type { AuthVariables } from "../auth";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma.js";
+import type { AuthVariables } from "../auth.js";
 import {
   AdminUsersQuerySchema,
   AdminPostsQuerySchema,
@@ -16,7 +17,7 @@ import {
   type AdminPostsResponse,
   type Announcement,
   type AdminAnnouncementsResponse,
-} from "../types";
+} from "../types.js";
 
 const adminRouter = new Hono<{ Variables: AuthVariables }>();
 
@@ -92,9 +93,15 @@ adminRouter.get("/stats", async (c) => {
   ]);
 
   // Calculate settlement stats
-  const settledPosts = settlementStats.reduce((acc, stat) => acc + stat._count, 0);
-  const wins = settlementStats.find((s) => s.isWin === true)?._count || 0;
-  const losses = settlementStats.find((s) => s.isWin === false)?._count || 0;
+  type SettlementStat = Prisma.PostGroupByOutputType;
+  const settledPosts = (settlementStats as SettlementStat[]).reduce(
+    (acc, stat) => acc + stat._count,
+    0
+  );
+  const wins =
+    (settlementStats as SettlementStat[]).find((s) => s.isWin === true)?._count || 0;
+  const losses =
+    (settlementStats as SettlementStat[]).find((s) => s.isWin === false)?._count || 0;
   const winRate = settledPosts > 0 ? (wins / settledPosts) * 100 : 0;
 
   const stats: AdminStats = {
@@ -175,8 +182,30 @@ adminRouter.get(
       prisma.user.count({ where }),
     ]);
 
+    type AdminUserRow = Prisma.UserGetPayload<{
+      select: {
+        id: true;
+        name: true;
+        email: true;
+        username: true;
+        image: true;
+        walletAddress: true;
+        level: true;
+        xp: true;
+        isAdmin: true;
+        createdAt: true;
+        _count: {
+          select: {
+            posts: true;
+            followers: true;
+            following: true;
+          };
+        };
+      };
+    }>;
+
     const response: AdminUsersResponse = {
-      users: users.map((user): AdminUser => ({
+      users: (users as AdminUserRow[]).map((user): AdminUser => ({
         id: user.id,
         name: user.name,
         email: user.email,
@@ -259,8 +288,42 @@ adminRouter.get(
       prisma.post.count({ where }),
     ]);
 
+    type AdminPostRow = Prisma.PostGetPayload<{
+      select: {
+        id: true;
+        content: true;
+        authorId: true;
+        author: {
+          select: {
+            id: true;
+            name: true;
+            username: true;
+            image: true;
+            level: true;
+          };
+        };
+        contractAddress: true;
+        chainType: true;
+        tokenSymbol: true;
+        entryMcap: true;
+        currentMcap: true;
+        settled: true;
+        settledAt: true;
+        isWin: true;
+        viewCount: true;
+        createdAt: true;
+        _count: {
+          select: {
+            likes: true;
+            comments: true;
+            reposts: true;
+          };
+        };
+      };
+    }>;
+
     const response: AdminPostsResponse = {
-      posts: posts.map((post): AdminPost => ({
+      posts: (posts as AdminPostRow[]).map((post): AdminPost => ({
         id: post.id,
         content: post.content,
         authorId: post.authorId,
@@ -396,8 +459,27 @@ adminRouter.get(
       prisma.announcement.count(),
     ]);
 
+    type AdminAnnouncementRow = Prisma.AnnouncementGetPayload<{
+      include: {
+        author: {
+          select: {
+            id: true;
+            name: true;
+            username: true;
+            image: true;
+          };
+        };
+        _count: {
+          select: {
+            views: true;
+          };
+        };
+      };
+    }>;
+
     const response: AdminAnnouncementsResponse = {
-      announcements: announcements.map((a): Announcement => ({
+      announcements: (announcements as AdminAnnouncementRow[]).map(
+        (a): Announcement => ({
         id: a.id,
         title: a.title,
         content: a.content,
@@ -408,7 +490,8 @@ adminRouter.get(
         authorId: a.authorId,
         author: a.author,
         viewCount: a._count.views,
-      })),
+      })
+      ),
       total,
       page,
       limit,
