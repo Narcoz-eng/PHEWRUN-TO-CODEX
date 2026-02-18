@@ -1,21 +1,23 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useSession } from "@/lib/auth-client";
+import { useAuth } from "@/lib/auth-client";
 import { Zap } from "lucide-react";
 
+// This page is no longer needed with Better Auth
+// Keeping it as a redirect for backwards compatibility
 export default function VerifyOtp() {
   const navigate = useNavigate();
-  const { data: session, isPending } = useSession();
+  const { isAuthenticated, isReady } = useAuth();
 
   useEffect(() => {
-    if (!isPending) {
-      if (session?.user) {
+    if (isReady) {
+      if (isAuthenticated) {
         navigate("/", { replace: true });
       } else {
         navigate("/login", { replace: true });
       }
     }
-  }, [isPending, session?.user, navigate]);
+  }, [isReady, isAuthenticated, navigate]);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

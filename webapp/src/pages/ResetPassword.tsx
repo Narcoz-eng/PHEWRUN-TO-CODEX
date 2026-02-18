@@ -1,122 +1,155 @@
-import { FormEvent, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { resetPassword } from "@/lib/auth-client";
+import { ArrowRight, CheckCircle2, Loader2, Lock, ShieldAlert } from "lucide-react";
+import { toast } from "sonner";
 
 export default function ResetPassword() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-
-  const token = useMemo(() => searchParams.get("token") || "", [searchParams]);
+  const token = useMemo(() => searchParams.get("token"), [searchParams]);
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
 
     if (!token) {
-      toast.error("Missing reset token. Request a new reset email.");
+      setError("Missing reset token. Please use the link from your email.");
       return;
     }
 
     if (newPassword.length < 8) {
-      toast.error("Password must be at least 8 characters");
+      setError("Password must be at least 8 characters.");
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match");
+      setError("Passwords do not match.");
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      setIsSubmitting(true);
-      await resetPassword(token, newPassword);
-      toast.success("Password updated. You can now sign in.");
-      navigate("/login", { replace: true });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to reset password";
-      toast.error(message);
+      const result = await resetPassword(newPassword, token);
+      if (result.error) {
+        setError(result.error.message || "Failed to reset password.");
+        return;
+      }
+      setIsSuccess(true);
+      toast.success("Password reset successful. You can sign in now.");
+    } catch (err) {
+      console.error("Reset password error:", err);
+      setError("Failed to reset password.");
     } finally {
       setIsSubmitting(false);
     }
-  }
-
-  if (!token) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Reset Link Invalid</CardTitle>
-            <CardDescription>
-              This reset link is missing a token or has expired. Request a new reset email.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild className="w-full">
-              <Link to="/login">Back to Login</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Set New Password</CardTitle>
-          <CardDescription>Enter your new password to complete reset.</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div className="w-full max-w-md card-premium p-8 space-y-6">
+        <div className="text-center space-y-2">
+          <h1 className="text-2xl font-semibold">Reset your password</h1>
+          <p className="text-sm text-muted-foreground">
+            Set a new password for your account.
+          </p>
+        </div>
+
+        {!token && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300 flex items-start gap-2">
+            <ShieldAlert className="w-4 h-4 mt-0.5" />
+            <span>Invalid or missing reset token.</span>
+          </div>
+        )}
+
+        {isSuccess ? (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 mt-0.5" />
+              <span>Your password has been updated.</span>
+            </div>
+            <Button className="w-full h-11" onClick={() => navigate("/login", { replace: true })}>
+              Back to sign in
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </div>
+        ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="new-password">New Password</Label>
-              <Input
-                id="new-password"
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 8 characters"
-                required
-                minLength={8}
-              />
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="new-password"
+                  type="password"
+                  className="pl-10 h-11"
+                  minLength={8}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={isSubmitting}
+                  required
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm Password</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Re-enter your password"
-                required
-                minLength={8}
-              />
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  className="pl-10 h-11"
+                  minLength={8}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  disabled={isSubmitting}
+                  required
+                />
+              </div>
             </div>
 
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
+            {error && (
+              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full h-11 font-semibold gap-2" disabled={isSubmitting || !token}>
               {isSubmitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Updating...
                 </>
               ) : (
-                "Update Password"
+                <>
+                  Update Password
+                  <ArrowRight className="w-4 h-4" />
+                </>
               )}
             </Button>
+
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full h-11"
+              onClick={() => navigate("/login", { replace: true })}
+              disabled={isSubmitting}
+            >
+              Back to sign in
+            </Button>
           </form>
-        </CardContent>
-      </Card>
+        )}
+      </div>
     </div>
   );
 }

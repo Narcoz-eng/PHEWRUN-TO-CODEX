@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { useSession, usePrivyAuth } from "@/lib/auth-client";
+import { useSession, useAuth } from "@/lib/auth-client";
 import { api, ApiError } from "@/lib/api";
 import { Post, User } from "@/types";
 import { PostCard } from "@/components/feed/PostCard";
@@ -42,7 +42,7 @@ function FeedError({ error, onRetry }: { error: Error; onRetry: () => void }) {
 
 export default function Feed() {
   const { data: session } = useSession();
-  const { logout } = usePrivyAuth();
+  const { signOut } = useAuth();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<FeedTab>("latest");
@@ -226,7 +226,7 @@ export default function Feed() {
   };
 
   const handleSignOut = async () => {
-    await logout();
+    await signOut();
   };
 
   const handleLike = async (postId: string) => {

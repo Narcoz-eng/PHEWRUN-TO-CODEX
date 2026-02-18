@@ -1,34 +1,15 @@
-// In deployed environments, prefer same-origin to keep auth cookies first-party.
+// In production (vibecode.run domain), use same-origin API calls
+// In development, use localhost:3000
 const API_BASE_URL = (() => {
-  const explicit = import.meta.env.VITE_BACKEND_URL?.trim();
-
-  if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    const isLocal = host === "localhost" || host === "127.0.0.1";
-
-    if (!isLocal) {
-      if (explicit && explicit.length > 0) {
-        try {
-          const explicitUrl = new URL(explicit);
-          const currentOrigin = window.location.origin;
-          if (explicitUrl.origin !== currentOrigin) {
-            console.warn(
-              `[API] VITE_BACKEND_URL (${explicitUrl.origin}) differs from frontend origin (${currentOrigin}). ` +
-              "This can break cookie auth. Prefer same-origin deploys."
-            );
-          }
-        } catch {
-          console.warn("[API] VITE_BACKEND_URL is not a valid URL, falling back to same origin.");
-        }
-      }
-      return explicit && explicit.length > 0 ? explicit : window.location.origin;
-    }
+  // Check env var first
+  if (import.meta.env.VITE_BACKEND_URL) {
+    return import.meta.env.VITE_BACKEND_URL;
   }
-
-  if (explicit && explicit.length > 0) {
-    return explicit;
+  // Auto-detect production: if we're on vibecode.run, use same origin
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.vibecode.run')) {
+    return window.location.origin;
   }
-
+  // Default to localhost for development
   return "http://localhost:3000";
 })();
 
@@ -66,7 +47,7 @@ interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 
-// Token getter - used as a fallback when cookies are unavailable.
+// Token getter - will be set by the auth provider
 let getAuthToken: (() => Promise<string | null>) | null = null;
 
 export function setAuthTokenGetter(getter: () => Promise<string | null>) {
@@ -77,20 +58,19 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const url = `${API_BASE_URL}${endpoint}`;
   const { timeout = DEFAULT_TIMEOUT, ...fetchOptions } = options;
 
-  // Get auth token if available
-  const token = getAuthToken ? await getAuthToken() : null;
-
-  const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null;
-  const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
-  const headers: HeadersInit = {
-    ...(hasBody && !isFormData ? { "Content-Type": "application/json" } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...fetchOptions.headers,
-  };
+  // Get auth token - try getter first, then localStorage fallback
+  let token = getAuthToken ? await getAuthToken() : null;
+  if (!token && typeof window !== "undefined") {
+    token = localStorage.getItem("auth-token");
+  }
 
   const config: RequestInit = {
     ...fetchOptions,
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...fetchOptions.headers,
+    },
     credentials: "include",
   };
 
@@ -129,15 +109,11 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     return undefined as T;
   }
 
-  // 2. JSON responses: unwrap app envelope ({ data }) when present,
-  // while also supporting raw JSON responses (Better Auth routes).
+  // 2. JSON responses: parse and unwrap { data }
   const contentType = response.headers.get("content-type");
   if (contentType?.includes("application/json")) {
-    const json = await response.json();
-    if (json && typeof json === "object" && "data" in (json as Record<string, unknown>)) {
-      return (json as ApiResponse<T>).data;
-    }
-    return json as T;
+    const json: ApiResponse<T> = await response.json();
+    return json.data;
   }
 
   // 3. Non-JSON: return undefined (caller should use api.raw() for these)
@@ -149,8 +125,11 @@ async function rawRequest(endpoint: string, options: RequestOptions = {}): Promi
   const url = `${API_BASE_URL}${endpoint}`;
   const { timeout = DEFAULT_TIMEOUT, ...fetchOptions } = options;
 
-  // Get auth token if available
-  const token = getAuthToken ? await getAuthToken() : null;
+  // Get auth token - try getter first, then localStorage fallback
+  let token = getAuthToken ? await getAuthToken() : null;
+  if (!token && typeof window !== "undefined") {
+    token = localStorage.getItem("auth-token");
+  }
 
   const config: RequestInit = {
     ...fetchOptions,

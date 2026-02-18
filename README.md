@@ -292,36 +292,17 @@ backend/                # Hono API server
 
 ### Frontend (.env)
 ```
-VITE_BACKEND_URL=https://your-backend-domain.com
-VITE_LOCAL_BACKEND_URL=http://localhost:3000
+VITE_BACKEND_URL=http://localhost:3000
 VITE_PRIVY_APP_ID=your-privy-app-id
 ```
 
 ### Backend (.env)
 ```
 DATABASE_URL=file:./dev.db
-BACKEND_URL=http://localhost:3000
-FRONTEND_URL=http://localhost:8000
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-SMTP_HOST=smtp.your-provider.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=your-smtp-user
-SMTP_PASS=your-smtp-password
-SMTP_FROM=noreply@your-domain.com
+PRIVY_APP_ID=your-privy-app-id
+PRIVY_APP_SECRET=your-privy-app-secret
 NODE_ENV=development
 ```
-
-Important:
-- `BACKEND_URL` must match the actual backend host serving `/api/auth/*` for that environment.
-- If `VITE_BACKEND_URL` points to a preview backend, that preview backend's `BACKEND_URL` should also be the preview URL.
-- Mismatching these URLs can break Google OAuth callbacks and password reset links.
-
-## Git Hygiene Before Deploy
-- Never commit `.env` or `.env.production` files. Use `.env.example` files as templates.
-- Rotate any secrets that were ever stored in plaintext in local/shared files (API keys, OAuth secrets, SMTP passwords).
-- Keep production secrets only in your deployment platform environment settings.
 
 ## Security Features
 

@@ -5,7 +5,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { DailyGainersTable } from "@/components/leaderboard/DailyGainersTable";
 import { TopUsersTable } from "@/components/leaderboard/TopUsersTable";
 import { StatsOverview } from "@/components/leaderboard/StatsOverview";
-import { useSession } from "@/lib/auth-client";
+import { useSession, useAuth } from "@/lib/auth-client";
 import { api } from "@/lib/api";
 import { User } from "@/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -30,14 +30,13 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usePrivyAuth } from "@/lib/auth-client";
 
 type LeaderboardSection = "gainers" | "users" | "stats";
 
 export default function Leaderboard() {
   const navigate = useNavigate();
   const { data: session } = useSession();
-  const { logout } = usePrivyAuth();
+  const { signOut } = useAuth();
 
   // Fetch current user
   const { data: user } = useQuery({
@@ -65,7 +64,7 @@ export default function Leaderboard() {
   const unreadCount = unreadData?.count ?? 0;
 
   const handleLogout = async () => {
-    await logout();
+    await signOut();
     navigate("/login");
   };
 
