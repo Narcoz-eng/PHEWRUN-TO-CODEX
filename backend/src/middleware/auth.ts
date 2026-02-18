@@ -2,6 +2,23 @@ import { createMiddleware } from "hono/factory";
 import { auth } from "../lib/auth";
 import { prisma } from "../prisma";
 
+const SESSION_COOKIE_NAMES = ["auth.session_token", "better-auth.session_token"] as const;
+
+function getSessionTokenFromCookie(cookieHeader: string | undefined): string | null {
+  if (!cookieHeader) return null;
+
+  const pairs = cookieHeader.split(";").map((part) => part.trim());
+  for (const cookieName of SESSION_COOKIE_NAMES) {
+    const prefix = `${cookieName}=`;
+    const match = pairs.find((pair) => pair.startsWith(prefix));
+    if (match) {
+      return match.slice(prefix.length);
+    }
+  }
+
+  return null;
+}
+
 // Define the user type that will be available in context
 // This matches the Better Auth user structure
 export interface AuthUser {
@@ -26,7 +43,7 @@ export interface AuthUser {
   lastPhotoUpdate: Date | null;
 }
 
-// Simplified user type for routes (backwards compatible with old PrivyUser)
+// Simplified user type for route handlers
 export interface SimpleUser {
   id: string;
   email: string | null;
@@ -52,6 +69,34 @@ export const betterAuthMiddleware = createMiddleware<{ Variables: AuthVariables 
       let session = await auth.api.getSession({
         headers: c.req.raw.headers,
       });
+
+      // If Better Auth cookie parsing fails, try reading known cookie names directly
+      if (!session?.user) {
+        const cookieToken = getSessionTokenFromCookie(c.req.header("Cookie"));
+        if (cookieToken) {
+          const dbSession = await prisma.session.findFirst({
+            where: {
+              token: cookieToken,
+              expiresAt: { gt: new Date() },
+            },
+            include: { user: true },
+          });
+
+          if (dbSession?.user) {
+            session = {
+              session: {
+                id: dbSession.id,
+                userId: dbSession.userId,
+                token: dbSession.token,
+                expiresAt: dbSession.expiresAt,
+                createdAt: dbSession.createdAt,
+                updatedAt: dbSession.updatedAt,
+              },
+              user: dbSession.user as AuthUser,
+            } as Awaited<ReturnType<typeof auth.api.getSession>>;
+          }
+        }
+      }
 
       // If no cookie session, try Bearer token
       if (!session?.user) {

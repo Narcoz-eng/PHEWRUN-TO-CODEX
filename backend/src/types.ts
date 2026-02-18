@@ -38,16 +38,13 @@ export type UpdateProfile = z.infer<typeof UpdateProfileSchema>;
 // Wallet Types
 // =====================================================
 
-// Wallet address validation - supports Solana (Base58, 32-44 chars) and EVM (0x + 40 hex chars)
+// Wallet address validation - Solana only (Base58, 32-44 chars)
 export const WalletAddressSchema = z.string().refine((val) => {
-  // Solana: Base58, 32-44 chars
   const solanaRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-  // EVM: 0x prefix + 40 hex chars
-  const evmRegex = /^0x[a-fA-F0-9]{40}$/;
-  return solanaRegex.test(val) || evmRegex.test(val);
-}, 'Invalid wallet address format');
+  return solanaRegex.test(val);
+}, 'Invalid Solana wallet address format');
 
-export const WalletProviderSchema = z.enum(['phantom', 'solflare', 'metamask', 'other']).default('other');
+export const WalletProviderSchema = z.enum(['phantom', 'solflare', 'manual', 'other']).default('other');
 
 export const ConnectWalletSchema = z.object({
   walletAddress: WalletAddressSchema,
@@ -343,7 +340,7 @@ export function calculate6HSettlement(
 }
 
 // =====================================================
-// Auth Types (Privy)
+// Auth Types
 // =====================================================
 
 export const AuthSyncResponseSchema = z.object({
@@ -884,34 +881,3 @@ export const LeaderboardQuerySchema = z.object({
 });
 
 export type LeaderboardQuery = z.infer<typeof LeaderboardQuerySchema>;
-
-// =====================================================
-// User Stats Types (Accuracy Score System)
-// =====================================================
-
-// Weekly stats item for bar chart
-export const WeeklyStatSchema = z.object({
-  date: z.string(), // ISO date string (YYYY-MM-DD)
-  dayLabel: z.string(), // e.g., "Mon", "Tue"
-  wins: z.number(),
-  losses: z.number(),
-  total: z.number(),
-});
-
-export type WeeklyStat = z.infer<typeof WeeklyStatSchema>;
-
-// User stats response schema
-export const UserStatsSchema = z.object({
-  accuracyScore: z.number().min(0).max(100), // 0-100%
-  totalPosts: z.number(),
-  settledPosts: z.number(),
-  wins: z.number(),
-  losses: z.number(),
-  avgPercentChange: z.number().nullable(), // Average percent change across all settled posts
-  streakCurrent: z.number(), // Current win/loss streak (positive = win, negative = loss)
-  streakBest: z.number(), // Best win streak ever
-  monthlyChange: z.number().nullable(), // Comparison to last month's accuracy (e.g., +12.4%)
-  weeklyStats: z.array(WeeklyStatSchema), // Last 7 days for bar chart
-});
-
-export type UserStats = z.infer<typeof UserStatsSchema>;

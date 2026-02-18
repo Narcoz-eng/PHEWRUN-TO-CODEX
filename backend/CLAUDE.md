@@ -1,60 +1,48 @@
-<stack>
-  Bun runtime, Hono web framework, Zod validation.
-</stack>
+# Vibecode Workspace
 
-<structure>
-  src/index.ts     — App entry, middleware, route mounting
-  src/routes/      — Route modules (create as needed)
-</structure>
+This workspace contains a mobile app and backend server.
 
-<routes>
-  Create routes in src/routes/ and mount them in src/index.ts.
+<projects>
+  webapp/    — React app (port 8000, environment variable VITE_BASE_URL)
+  backend/   — Hono API server (port 3000, environment variable VITE_BACKEND_URL)
+</projects>
 
-  Example route file (src/routes/todos.ts):
-  ```typescript
-  import { Hono } from "hono";
-  import { zValidator } from "@hono/zod-validator";
-  import { z } from "zod";
+<agents>
+  Use subagents for project-specific work:
+  - backend-developer: Changes to the backend API
+  - webapp-developer: Changes to the webapp frontend
 
-  const todosRouter = new Hono();
+  Each agent reads its project's CLAUDE.md for detailed instructions.
+</agents>
 
-  todosRouter.get("/", (c) => {
-    return c.json({ todos: [] });
-  });
+<coordination>
+  When a feature needs both frontend and backend:
+  1. Define Zod schemas for request/response in backend/src/types.ts (shared contracts)
+  2. Implement backend route using the schemas
+  3. Test backend with cURL (use $BACKEND_URL, never localhost)
+  4. Implement frontend, importing schemas from backend/src/types.ts to parse responses
+  5. Test the integration
 
-  todosRouter.post(
-    "/",
-    zValidator("json", z.object({ title: z.string() })),
-    (c) => {
-      const { title } = c.req.valid("json");
-      return c.json({ todo: { id: "1", title } });
-    }
-  );
+  <shared_types>
+    All API contracts live in backend/src/types.ts as Zod schemas.
+    Both backend and frontend can import from this file — single source of truth.
+  </shared_types>
+</coordination>
 
-  export { todosRouter };
-  ```
+<skills>
+  Shared skills in .claude/skills/:
+  - database-auth: Set up Prisma + Better Auth for user accounts and data persistence
+  - ai-apis-like-chatgpt: Use this skill when the user asks you to make an app that requires an AI API.
 
-  Mount in src/index.ts:
-  ```typescript
-  import { todosRouter } from "./routes/todos";
-  app.route("/api/todos", todosRouter);
-  ```
+  Frontend only skills:
+  - frontend-app-design: Create distinctive, production-grade web interfaces using React, Tailwind, and shadcn/ui. Use when building pages, components, or styling any web UI.
+</skills>
 
-  IMPORTANT: Make sure all endpoints and routes are prefixed with `/api/`
-</routes>
-
-<shared_types>
-  Define all API contracts in src/types.ts as Zod schemas.
-  This file is the single source of truth — both backend and frontend import from here.
-</shared_types>
-
-<curl_testing>
-  ALWAYS test APIs with cURL after implementing.
-  Use $BACKEND_URL environment variable, never localhost.
-  Verify response matches the Zod schema before telling frontend it's ready.
-</curl_testing>
-
-<database>
-  No database is configured by default.
-  If the user needs to persist data or have user accounts, use the database-auth skill and then update this file to reflect the changes.
-</database>
+<environment>
+  System manages git and dev servers. DO NOT manage these.
+  The user views the app through Vibecode Mobile App with a webview preview or Vibecode Web App with an iframe preview.
+  The user cannot see code or terminal. Do everything for them.
+  Write one-off scripts to achieve tasks the user asks for.
+  Communicate in an easy to understand manner for non-technical users.
+  Be concise and don't talk too much.
+</environment>
