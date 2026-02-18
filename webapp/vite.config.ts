@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => ({
     port: 8000,
     allowedHosts: true, // Allow all hosts
   },
+  define: {
+    global: "globalThis",
+  },
   plugins: [
     react(),
     mode === "development" && vibecodePlugin(),
@@ -17,27 +20,6 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@noble/hashes/_assert": path.resolve(__dirname, "./src/shims/noble-assert.ts"),
-    },
-  },
-  define: {
-    // Fix for packages that check for process.env
-    "process.env": {},
-    global: "globalThis",
-  },
-  optimizeDeps: {
-    include: [
-      "@solana/wallet-adapter-react",
-      "@solana/wallet-adapter-react-ui",
-      "@solana/wallet-adapter-wallets",
-      "@solana/web3.js",
-      "buffer",
-    ],
-    esbuildOptions: {
-      // Node.js global to browser globalThis
-      define: {
-        global: "globalThis",
-      },
     },
   },
 }));

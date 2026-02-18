@@ -1,137 +1,212 @@
-import { useCallback, useMemo, useState } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletReadyState } from "@solana/wallet-adapter-base";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import bs58 from "bs58";
+import { applySessionToken, normalizeAuthUser } from "@/lib/auth-client";
 
-interface WalletAuthResult {
-  success: boolean;
-  error?: string;
+export type WalletProviderId = "phantom" | "solflare";
+
+interface SolanaPublicKey {
+  toString: () => string;
 }
 
-// Message template for signing to verify wallet ownership
-const createSignMessage = (walletAddress: string, nonce: string): string => {
-  return `Sign this message to verify your wallet ownership.\n\nWallet: ${walletAddress}\nNonce: ${nonce}\nTimestamp: ${new Date().toISOString()}`;
-};
+interface ConnectResult {
+  publicKey?: SolanaPublicKey;
+}
 
-// Generate a random nonce for the signature
-const generateNonce = (): string => {
-  const array = new Uint8Array(16);
-  crypto.getRandomValues(array);
-  return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
-};
+type SignMessageOutput =
+  | Uint8Array
+  | { signature?: Uint8Array | number[] }
+  | number[];
+
+interface SolanaProvider {
+  isConnected?: boolean;
+  publicKey?: SolanaPublicKey;
+  connect: (args?: Record<string, unknown>) => Promise<ConnectResult | void>;
+  disconnect?: () => Promise<void>;
+  signMessage?: (message: Uint8Array, encoding?: string) => Promise<SignMessageOutput>;
+}
+
+declare global {
+  interface Window {
+    phantom?: {
+      solana?: SolanaProvider;
+    };
+    solflare?: SolanaProvider;
+  }
+}
+
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function base58Encode(bytes: Uint8Array): string {
+  if (bytes.length === 0) return "";
+
+  const digits: number[] = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let i = 0; i < digits.length; i++) {
+      const value = (digits[i] ?? 0) * 256 + carry;
+      digits[i] = value % 58;
+      carry = Math.floor(value / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+
+  let zeroCount = 0;
+  while (zeroCount < bytes.length && bytes[zeroCount] === 0) {
+    zeroCount++;
+  }
+
+  let result = "1".repeat(zeroCount);
+  for (let i = digits.length - 1; i >= 0; i--) {
+    const idx = digits[i] ?? 0;
+    result += BASE58_ALPHABET[idx] ?? "";
+  }
+  return result;
+}
+
+function asUint8Array(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (Array.isArray(value) && value.every((v) => typeof v === "number")) {
+    return new Uint8Array(value);
+  }
+  if (value && typeof value === "object" && "signature" in value) {
+    return asUint8Array((value as { signature?: unknown }).signature);
+  }
+  return null;
+}
+
+function getProvider(provider: WalletProviderId): SolanaProvider | null {
+  if (typeof window === "undefined") return null;
+  if (provider === "phantom") {
+    return window.phantom?.solana ?? null;
+  }
+  return window.solflare ?? null;
+}
+
+function isInstalled(provider: WalletProviderId) {
+  return !!getProvider(provider);
+}
+
+function resolveAddress(provider: SolanaProvider, connectResult: ConnectResult | void) {
+  const fromConnect = connectResult?.publicKey?.toString?.();
+  if (fromConnect && fromConnect.length > 0) {
+    return fromConnect;
+  }
+  const fromProvider = provider.publicKey?.toString?.();
+  if (fromProvider && fromProvider.length > 0) {
+    return fromProvider;
+  }
+  return null;
+}
+
+function buildAuthMessage(address: string) {
+  return [
+    "Sign in to Just a Phew",
+    `Wallet: ${address}`,
+    `Timestamp: ${new Date().toISOString()}`,
+  ].join("\n");
+}
+
+interface WalletAuthResponse {
+  token?: string;
+  user?: unknown;
+}
 
 export function useWalletAuth() {
-  const { publicKey, signMessage, connected, disconnect, wallet, wallets } = useWallet();
-  const { setVisible } = useWalletModal();
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availableWallets, setAvailableWallets] = useState({
+    phantom: isInstalled("phantom"),
+    solflare: isInstalled("solflare"),
+  });
 
-  const hasAvailableWallets = useMemo(
-    () =>
-      wallets.some(
-        (walletOption) =>
-          walletOption.readyState === WalletReadyState.Installed ||
-          walletOption.readyState === WalletReadyState.Loadable
-      ),
-    [wallets]
-  );
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setAvailableWallets({
+        phantom: isInstalled("phantom"),
+        solflare: isInstalled("solflare"),
+      });
+    }, 1000);
 
-  // Open wallet selection modal
-  const openWalletModal = useCallback(() => {
-    setError(null);
-    if (!hasAvailableWallets) {
-      setError("No compatible wallet extension detected. Install Phantom or Solflare and refresh.");
-      return;
-    }
-    setVisible(true);
-  }, [hasAvailableWallets, setVisible]);
+    return () => window.clearInterval(id);
+  }, []);
 
-  // Sign message and authenticate with backend
-  const authenticateWallet = useCallback(async (): Promise<WalletAuthResult> => {
-    if (!publicKey || !signMessage) {
-      return { success: false, error: "Wallet not connected or does not support message signing" };
+  const connectWallet = useCallback(async (providerId: WalletProviderId) => {
+    const provider = getProvider(providerId);
+    if (!provider) {
+      throw new Error(`${providerId} wallet extension is not installed`);
     }
 
-    setIsAuthenticating(true);
-    setError(null);
+    const connectResult = await provider.connect();
+    const address = resolveAddress(provider, connectResult);
+    if (!address) {
+      throw new Error("Wallet connected but no public key was returned");
+    }
 
-    try {
-      const walletAddress = publicKey.toBase58();
-      const nonce = generateNonce();
-      const message = createSignMessage(walletAddress, nonce);
+    return { provider, address };
+  }, []);
 
-      // Request signature from wallet
-      const messageBytes = new TextEncoder().encode(message);
-      const signatureBytes = await signMessage(messageBytes);
-      const signature = bs58.encode(signatureBytes);
+  const authenticateWithWallet = useCallback(
+    async (providerId: WalletProviderId) => {
+      setIsConnecting(true);
+      setError(null);
 
-      // Get wallet provider name
-      const walletProvider = wallet?.adapter?.name?.toLowerCase() || "unknown";
+      try {
+        const { provider, address } = await connectWallet(providerId);
+        if (!provider.signMessage) {
+          throw new Error("This wallet does not support message signing");
+        }
 
-      // Send to backend for verification
-      const response = await api.raw("/api/auth/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          walletAddress,
-          walletProvider,
+        const message = buildAuthMessage(address);
+        const messageBytes = new TextEncoder().encode(message);
+        const signed = await provider.signMessage(messageBytes, "utf8");
+        const signatureBytes = asUint8Array(signed);
+        if (!signatureBytes) {
+          throw new Error("Failed to get a valid signature from wallet");
+        }
+
+        const signature = base58Encode(signatureBytes);
+        const payload = await api.post<WalletAuthResponse>("/api/auth/wallet", {
+          walletAddress: address,
+          walletProvider: providerId,
           signature,
           message,
-          nonce,
-        }),
-      });
+        });
 
-      const data = await response.json().catch(() => null) as {
-        token?: string;
-        error?: { message?: string };
-      } | null;
+        applySessionToken(payload);
+        const user = normalizeAuthUser(payload);
 
-      if (response.ok && !data?.error) {
-        if (data?.token) {
-          // Keep a bearer fallback for cross-origin/cookie-restricted environments
-          localStorage.setItem("auth-token", data.token);
-        }
-        return { success: true };
-      } else {
-        const errorMessage = data?.error?.message || "Failed to authenticate wallet";
-        setError(errorMessage);
-        return { success: false, error: errorMessage };
+        return {
+          address,
+          provider: providerId,
+          user,
+          payload,
+        };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Wallet authentication failed";
+        setError(message);
+        throw e;
+      } finally {
+        setIsConnecting(false);
       }
-    } catch (err) {
-      console.error("Wallet auth error:", err);
-      const errorMessage = err instanceof Error ? err.message : "Failed to sign message";
-      setError(errorMessage);
-      return { success: false, error: errorMessage };
-    } finally {
-      setIsAuthenticating(false);
-    }
-  }, [publicKey, signMessage, wallet]);
+    },
+    [connectWallet]
+  );
 
-  // Disconnect wallet
-  const disconnectWallet = useCallback(async () => {
-    try {
-      await disconnect();
-      setError(null);
-    } catch (err) {
-      console.error("Disconnect error:", err);
-    }
-  }, [disconnect]);
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
 
   return {
-    // State
-    connected,
-    publicKey: publicKey?.toBase58() ?? null,
-    walletName: wallet?.adapter?.name ?? null,
-    isAuthenticating,
+    isConnecting,
     error,
-    hasAvailableWallets,
-
-    // Actions
-    openWalletModal,
-    authenticateWallet,
-    disconnectWallet,
-    clearError: () => setError(null),
+    availableWallets,
+    connectWallet,
+    authenticateWithWallet,
+    clearError,
   };
 }

@@ -1,17 +1,8 @@
-import React from "react";
-
-interface AuthProviderProps {
+interface PrivyProviderProps {
   children: React.ReactNode;
 }
 
-/**
- * Simple Auth Provider wrapper for Better Auth
- * Better Auth handles session management via cookies automatically,
- * so this is mainly a placeholder for any auth-related context if needed.
- */
-export function AuthProvider({ children }: AuthProviderProps) {
+// Kept only for backwards compatibility with old imports.
+export function PrivyProvider({ children }: PrivyProviderProps) {
   return <>{children}</>;
 }
-
-// Keep the old export name for backwards compatibility during migration
-export { AuthProvider as PrivyProvider };

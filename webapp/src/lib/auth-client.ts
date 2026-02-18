@@ -1,430 +1,413 @@
 import { createAuthClient } from "better-auth/react";
-import { useState, useEffect, useCallback, createContext, useContext, createElement } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api, setAuthTokenGetter } from "@/lib/api";
 
-const isLocalDevHost = (hostname: string) =>
-  hostname === "localhost" || hostname === "127.0.0.1";
+const AUTH_TOKEN_STORAGE_KEY = "auth.session_token";
 
-const getAppOrigin = () =>
-  typeof window !== "undefined" ? window.location.origin : null;
+function resolveAuthBaseUrl() {
+  const explicit = import.meta.env.VITE_BACKEND_URL?.trim();
 
-// Get the backend URL
-const getBaseUrl = () => {
-  // In local browser development, default to local backend unless explicitly overridden
-  if (typeof window !== "undefined" && isLocalDevHost(window.location.hostname)) {
-    return import.meta.env.VITE_LOCAL_BACKEND_URL || "http://localhost:3000";
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocal = host === "localhost" || host === "127.0.0.1";
+    if (!isLocal) {
+      return explicit && explicit.length > 0 ? explicit : window.location.origin;
+    }
   }
 
-  if (import.meta.env.VITE_BACKEND_URL) {
-    return import.meta.env.VITE_BACKEND_URL;
-  }
-
-  if (typeof window !== "undefined" && window.location.hostname.endsWith(".vibecode.run")) {
-    return window.location.origin;
+  if (explicit && explicit.length > 0) {
+    return explicit;
   }
 
   return "http://localhost:3000";
-};
+}
 
-const baseURL = getBaseUrl();
-console.log("[Auth] Using backend URL:", baseURL);
+export const authBaseUrl = resolveAuthBaseUrl();
 
-// Create the Better Auth client
-// Better Auth expects baseURL to be the server root, it appends /api/auth/* itself
 export const authClient = createAuthClient({
-  baseURL,
-  basePath: "/api/auth", // Explicitly set the auth path
-  fetchOptions: {
-    credentials: "include",
-  },
+  baseURL: authBaseUrl,
 });
 
-console.log("[Auth] Better Auth client initialized with baseURL:", baseURL);
+let memorySessionToken: string | null = null;
 
-// Export auth functions from client
-export const { signIn, signUp, signOut } = authClient;
+function normalizeErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+  return fallback;
+}
 
-// Auth user interface
+function extractPayloadError(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  if (!("error" in result)) return null;
+  const payload = (result as { error?: unknown }).error;
+  if (!payload) return null;
+  if (typeof payload === "string") return payload;
+  if (typeof payload === "object" && "message" in payload) {
+    const message = (payload as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  }
+  return "Authentication request failed";
+}
+
+function unwrapPayload<T>(result: unknown): T | null {
+  if (!result) return null;
+  if (typeof result === "object" && "data" in (result as Record<string, unknown>)) {
+    return ((result as { data?: T | null }).data ?? null) as T | null;
+  }
+  return result as T;
+}
+
+function extractToken(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const token = (payload as { token?: unknown }).token;
+  if (typeof token === "string" && token.trim().length > 0) {
+    return token;
+  }
+  return null;
+}
+
+function extractUser(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const maybeUser = (payload as { user?: unknown }).user;
+  if (maybeUser && typeof maybeUser === "object") {
+    return maybeUser as Record<string, unknown>;
+  }
+  return null;
+}
+
+export function getStoredSessionToken() {
+  if (memorySessionToken) {
+    return memorySessionToken;
+  }
+
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  if (token) {
+    memorySessionToken = token;
+  }
+  return token;
+}
+
+export function setStoredSessionToken(token: string | null) {
+  memorySessionToken = token && token.trim().length > 0 ? token : null;
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (memorySessionToken) {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, memorySessionToken);
+  } else {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  }
+}
+
+setAuthTokenGetter(async () => getStoredSessionToken());
+
 export interface AuthUser {
   id: string;
-  email: string;
-  name: string;
-  image?: string | null;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  walletAddress: string | null;
+  username: string | null;
+  level: number;
+  xp: number;
+  bio: string | null;
 }
 
-// Session state
-interface SessionState {
+interface SessionResponse {
+  user: AuthUser;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function normalizeUser(raw: Record<string, unknown> | null | undefined): AuthUser | null {
+  if (!raw) return null;
+  const id = raw.id;
+  if (typeof id !== "string" || id.length === 0) {
+    return null;
+  }
+
+  return {
+    id,
+    name: typeof raw.name === "string" ? raw.name : null,
+    email: typeof raw.email === "string" ? raw.email : null,
+    image: typeof raw.image === "string" ? raw.image : null,
+    walletAddress: typeof raw.walletAddress === "string" ? raw.walletAddress : null,
+    username: typeof raw.username === "string" ? raw.username : null,
+    level: toNumber(raw.level, 0),
+    xp: toNumber(raw.xp, 0),
+    bio: typeof raw.bio === "string" ? raw.bio : null,
+  };
+}
+
+export async function signInWithEmail(email: string, password: string) {
+  try {
+    const result = await authClient.signIn.email({
+      email,
+      password,
+      callbackURL: "/",
+      rememberMe: true,
+    });
+
+    const payloadError = extractPayloadError(result);
+    if (payloadError) {
+      throw new Error(payloadError);
+    }
+
+    const payload = unwrapPayload<Record<string, unknown>>(result);
+    const token = extractToken(payload);
+    if (token) {
+      setStoredSessionToken(token);
+    }
+
+    return payload;
+  } catch (error) {
+    throw new Error(normalizeErrorMessage(error, "Failed to sign in"));
+  }
+}
+
+export async function signUpWithEmail(name: string, email: string, password: string) {
+  try {
+    const result = await authClient.signUp.email({
+      name,
+      email,
+      password,
+      callbackURL: "/",
+      rememberMe: true,
+    });
+
+    const payloadError = extractPayloadError(result);
+    if (payloadError) {
+      throw new Error(payloadError);
+    }
+
+    const payload = unwrapPayload<Record<string, unknown>>(result);
+    const token = extractToken(payload);
+    if (token) {
+      setStoredSessionToken(token);
+    }
+
+    return payload;
+  } catch (error) {
+    throw new Error(normalizeErrorMessage(error, "Failed to create account"));
+  }
+}
+
+export async function signInWithGoogle() {
+  try {
+    const callbackURL =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/callback`
+        : "/auth/callback";
+    const errorCallbackURL =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/login?oauth=error`
+        : "/login?oauth=error";
+
+    const result = await authClient.signIn.social({
+      provider: "google",
+      callbackURL,
+      newUserCallbackURL: callbackURL,
+      errorCallbackURL,
+      disableRedirect: true,
+    });
+
+    const payloadError = extractPayloadError(result);
+    if (payloadError) {
+      throw new Error(payloadError);
+    }
+
+    const payload = unwrapPayload<Record<string, unknown>>(result);
+    const url =
+      payload && typeof payload.url === "string" && payload.url.length > 0
+        ? payload.url
+        : null;
+
+    if (url && typeof window !== "undefined") {
+      window.location.href = url;
+    }
+
+    return payload;
+  } catch (error) {
+    throw new Error(normalizeErrorMessage(error, "Failed to start Google sign-in"));
+  }
+}
+
+export async function requestPasswordReset(email: string) {
+  try {
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/reset-password`
+        : "/reset-password";
+
+    const result = await authClient.forgetPassword({
+      email,
+      redirectTo,
+    });
+
+    const payloadError = extractPayloadError(result);
+    if (payloadError) {
+      throw new Error(payloadError);
+    }
+
+    return unwrapPayload<Record<string, unknown>>(result);
+  } catch (error) {
+    throw new Error(normalizeErrorMessage(error, "Failed to send reset email"));
+  }
+}
+
+export async function resetPassword(token: string, newPassword: string) {
+  try {
+    const result = await authClient.resetPassword({
+      token,
+      newPassword,
+    });
+
+    const payloadError = extractPayloadError(result);
+    if (payloadError) {
+      throw new Error(payloadError);
+    }
+
+    return unwrapPayload<Record<string, unknown>>(result);
+  } catch (error) {
+    throw new Error(normalizeErrorMessage(error, "Failed to reset password"));
+  }
+}
+
+export function applySessionToken(payload: unknown) {
+  const token = extractToken(payload);
+  if (token) {
+    setStoredSessionToken(token);
+  }
+  return token;
+}
+
+export interface PrivyAuthState {
   user: AuthUser | null;
-  isLoading: boolean;
   isAuthenticated: boolean;
-}
-
-// Auth context
-interface AuthContextType extends SessionState {
-  refetch: () => Promise<void>;
+  isReady: boolean;
+  login: () => void;
   logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+// Kept for backwards compatibility with existing imports.
+export function usePrivyAuth(): PrivyAuthState {
+  const { data, isPending } = useSession();
+  const user = data?.user ?? null;
 
-// Fetch session from backend using /api/me endpoint
-// This endpoint uses our custom middleware that supports Bearer tokens
-async function fetchSession(): Promise<AuthUser | null> {
-  try {
-    // Get token from localStorage as fallback for cross-origin issues
-    const token = localStorage.getItem("auth-token");
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+  const login = () => {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
     }
+  };
 
-    // Use /api/me which supports Bearer token auth via our middleware
-    const response = await fetch(`${baseURL}/api/me`, {
-      credentials: "include",
-      headers,
-    });
-
-    if (!response.ok) {
-      console.log("[Auth] Session response not ok:", response.status);
-      // Clear invalid token
-      if (response.status === 401) {
-        localStorage.removeItem("auth-token");
-      }
-      return null;
-    }
-
-    const text = await response.text();
-    console.log("[Auth] Session response text:", text);
-
-    // Handle null or empty responses
-    if (!text || text === "null" || text === "undefined") {
-      return null;
-    }
-
+  const logout = async () => {
     try {
-      const data = JSON.parse(text);
-
-      // /api/me returns user data directly wrapped in { data: user }
-      const user = data.data || data;
-      if (user && user.id) {
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-        };
-      }
-    } catch (parseError) {
-      console.log("[Auth] Failed to parse session response:", parseError);
+      await authClient.signOut();
+    } finally {
+      setStoredSessionToken(null);
     }
+  };
 
-    return null;
-  } catch (error) {
-    console.error("[Auth] Failed to fetch session:", error);
-    return null;
-  }
+  return {
+    user,
+    isAuthenticated: !!user,
+    isReady: !isPending,
+    login,
+    logout,
+  };
 }
 
-// Auth Provider component
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SessionState>({
-    user: null,
-    isLoading: true,
-    isAuthenticated: false,
-  });
+export function useSession() {
+  const sessionQuery = authClient.useSession();
+  const sessionUser = useMemo(() => {
+    const raw = (sessionQuery.data as { user?: Record<string, unknown> } | null)?.user;
+    return normalizeUser(raw ?? null);
+  }, [sessionQuery.data]);
 
-  const refetch = useCallback(async () => {
-    try {
-      const user = await fetchSession();
-      setState({
-        user,
-        isLoading: false,
-        isAuthenticated: !!user,
-      });
-    } catch {
-      setState({
-        user: null,
-        isLoading: false,
-        isAuthenticated: false,
-      });
-    }
-  }, []);
+  const [fallbackUser, setFallbackUser] = useState<AuthUser | null>(null);
+  const [fallbackPending, setFallbackPending] = useState(false);
 
-  const logout = useCallback(async () => {
-    try {
-      await signOut();
-      // Clear stored token
-      localStorage.removeItem("auth-token");
-      setState({
-        user: null,
-        isLoading: false,
-        isAuthenticated: false,
-      });
-    } catch (error) {
-      console.error("[Auth] Logout error:", error);
-      // Still clear local state on error
-      localStorage.removeItem("auth-token");
-      setState({
-        user: null,
-        isLoading: false,
-        isAuthenticated: false,
-      });
-    }
-  }, []);
-
-  // Initial session check
   useEffect(() => {
-    let mounted = true;
+    let disposed = false;
 
-    const checkSession = async () => {
-      const user = await fetchSession();
-      if (mounted) {
-        setState({
-          user,
-          isLoading: false,
-          isAuthenticated: !!user,
-        });
+    async function fetchFallbackUser() {
+      const token = getStoredSessionToken();
+      if (!token || sessionQuery.isPending || sessionUser) {
+        if (!token && !sessionUser) {
+          setFallbackUser(null);
+        }
+        return;
       }
-    };
 
-    checkSession();
+      setFallbackPending(true);
+      try {
+        const me = await api.get<Record<string, unknown>>("/api/me");
+        if (!disposed) {
+          setFallbackUser(normalizeUser(me));
+        }
+      } catch {
+        if (!disposed) {
+          setFallbackUser(null);
+          setStoredSessionToken(null);
+        }
+      } finally {
+        if (!disposed) {
+          setFallbackPending(false);
+        }
+      }
+    }
+
+    fetchFallbackUser();
 
     return () => {
-      mounted = false;
+      disposed = true;
     };
-  }, []);
+  }, [sessionQuery.isPending, sessionUser]);
 
-  return createElement(
-    AuthContext.Provider,
-    { value: { ...state, refetch, logout } },
-    children
-  );
-}
-
-// Hook to use auth context
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
+  const effectiveUser = sessionUser ?? fallbackUser;
 
   return {
-    user: context.user,
-    isAuthenticated: context.isAuthenticated,
-    isReady: !context.isLoading,
-    isPending: context.isLoading,
-    signOut: context.logout,
-    refetch: context.refetch,
+    data: effectiveUser ? ({ user: effectiveUser } as SessionResponse) : null,
+    isPending: sessionQuery.isPending || fallbackPending,
+    isRefetching: sessionQuery.isRefetching,
+    error: sessionQuery.error,
+    refetch: sessionQuery.refetch,
   };
 }
 
-// Session hook for ProtectedRoute/GuestRoute compatibility
-export function useSession() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useSession must be used within AuthProvider");
-  }
-
-  return {
-    data: context.user ? { user: context.user } : null,
-    isPending: context.isLoading,
-  };
-}
-
-// Legacy compatibility
-export function usePrivyAuth() {
-  const auth = useAuth();
-  return {
-    user: auth.user
-      ? {
-          id: auth.user.id,
-          email: auth.user.email,
-          walletAddress: null,
-          linkedAccounts: [],
-        }
-      : null,
-    isAuthenticated: auth.isAuthenticated,
-    isReady: auth.isReady,
-    login: () => console.warn("login() - use form-based login"),
-    logout: auth.signOut,
-  };
-}
-
-// Sign up function - use direct fetch for reliability
-export async function signUpWithEmail(email: string, password: string, name: string) {
-  console.log("[Auth] Attempting sign up for:", email);
+export async function signOut() {
   try {
-    const response = await fetch(`${baseURL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ email, password, name }),
-    });
-
-    // Try to parse JSON, but handle empty responses
-    let data: { message?: string; code?: string; token?: string; error?: { message?: string; code?: string }; [key: string]: unknown } | null = null;
-    const text = await response.text();
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        console.log("[Auth] Response is not JSON:", text);
-      }
-    }
-    console.log("[Auth] Sign up response:", response.status, data);
-
-    const payloadError = data?.error?.message || data?.error?.code;
-    if (!response.ok || payloadError) {
-      return { error: { message: payloadError || data?.message || data?.code || "Failed to create account" } };
-    }
-
-    // Store token in localStorage for cross-origin auth
-    if (data?.token) {
-      localStorage.setItem("auth-token", data.token);
-    }
-
-    return { data: data || { success: true } };
-  } catch (error) {
-    console.error("[Auth] Sign up error:", error);
-    return { error: { message: error instanceof Error ? error.message : "Sign up failed" } };
+    await authClient.signOut();
+  } finally {
+    setStoredSessionToken(null);
   }
 }
 
-// Sign in function - use direct fetch for reliability
-export async function signInWithEmail(email: string, password: string) {
-  console.log("[Auth] Attempting sign in for:", email);
-  try {
-    const response = await fetch(`${baseURL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ email, password }),
-    });
-
-    // Try to parse JSON, but handle empty responses
-    let data: { message?: string; code?: string; token?: string; error?: { message?: string; code?: string }; [key: string]: unknown } | null = null;
-    const text = await response.text();
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        console.log("[Auth] Response is not JSON:", text);
-      }
-    }
-    console.log("[Auth] Sign in response:", response.status, data);
-
-    const payloadError = data?.error?.message || data?.error?.code;
-    if (!response.ok || payloadError) {
-      return { error: { message: payloadError || data?.message || data?.code || "Invalid email or password" } };
-    }
-
-    // Store token in localStorage for cross-origin auth
-    if (data?.token) {
-      localStorage.setItem("auth-token", data.token);
-    }
-
-    return { data: data || { success: true } };
-  } catch (error) {
-    console.error("[Auth] Sign in error:", error);
-    return { error: { message: error instanceof Error ? error.message : "Sign in failed" } };
-  }
-}
-
-// Sign in with Google - use direct redirect
-export async function signInWithGoogle() {
-  console.log("[Auth] Redirecting to Google sign in");
-  // Trigger Better Auth social sign-in flow (handles method/redirect contract)
-  const origin = getAppOrigin() || baseURL;
-  const result = await signIn.social({
-    provider: "google",
-    callbackURL: `${origin}/auth/callback`,
-    errorCallbackURL: `${origin}/login?authError=google`,
-  });
-
-  if (result?.error) {
-    throw new Error(result.error.message || "Failed to start Google sign-in");
-  }
-}
-
-// Forgot password - request password reset email
-export async function forgotPassword(email: string) {
-  console.log("[Auth] Requesting password reset for:", email);
-  try {
-    const origin = getAppOrigin() || baseURL;
-    const response = await fetch(`${baseURL}/api/auth/request-password-reset`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        email,
-        redirectTo: `${origin}/reset-password`,
-      }),
-    });
-
-    let data: { message?: string; code?: string; error?: { message?: string; code?: string }; [key: string]: unknown } | null = null;
-    const text = await response.text();
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        console.log("[Auth] Response is not JSON:", text);
-      }
-    }
-    console.log("[Auth] Forgot password response:", response.status, data);
-
-    const payloadError = data?.error?.message || data?.error?.code;
-    if (!response.ok || payloadError) {
-      return { error: { message: payloadError || data?.message || data?.code || "Failed to send reset email" } };
-    }
-
-    return { data: data || { success: true } };
-  } catch (error) {
-    console.error("[Auth] Forgot password error:", error);
-    return { error: { message: error instanceof Error ? error.message : "Failed to send reset email" } };
-  }
-}
-
-// Reset password with token
-export async function resetPassword(newPassword: string, token: string) {
-  console.log("[Auth] Resetting password with token");
-  try {
-    const response = await fetch(`${baseURL}/api/auth/reset-password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ newPassword, token }),
-    });
-
-    let data: { message?: string; code?: string; error?: { message?: string; code?: string }; [key: string]: unknown } | null = null;
-    const text = await response.text();
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        console.log("[Auth] Response is not JSON:", text);
-      }
-    }
-    console.log("[Auth] Reset password response:", response.status, data);
-
-    const payloadError = data?.error?.message || data?.error?.code;
-    if (!response.ok || payloadError) {
-      return { error: { message: payloadError || data?.message || data?.code || "Failed to reset password" } };
-    }
-
-    return { data: data || { success: true } };
-  } catch (error) {
-    console.error("[Auth] Reset password error:", error);
-    return { error: { message: error instanceof Error ? error.message : "Failed to reset password" } };
-  }
-}
-
-// Check if running in an iframe
-export function isInIframe(): boolean {
-  try {
-    return window.self !== window.top;
-  } catch {
-    return true;
-  }
+// Utility for wallet-auth flow to normalize user payloads.
+export function normalizeAuthUser(payload: unknown) {
+  const user = extractUser(payload);
+  return normalizeUser(user);
 }

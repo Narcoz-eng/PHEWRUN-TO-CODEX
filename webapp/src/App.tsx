@@ -5,7 +5,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { AuthProvider } from "@/lib/auth-client";
 import { SolanaWalletProvider } from "@/components/SolanaWalletProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { GuestRoute } from "@/components/GuestRoute";
@@ -21,6 +20,7 @@ const Admin = lazy(() => import("./pages/Admin"));
 const Login = lazy(() => import("./pages/Login"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const VerifyOtp = lazy(() => import("./pages/VerifyOtp"));
 const PostDetail = lazy(() => import("./pages/PostDetail"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -44,8 +44,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <SolanaWalletProvider>
-        <AuthProvider>
-          <TooltipProvider>
+        <TooltipProvider>
           <Toaster />
           <Sonner />
           <BrowserRouter>
@@ -117,12 +116,12 @@ const App = () => (
                 />
                 <Route path="/auth/callback" element={<AuthCallback />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/verify-otp" element={<VerifyOtp />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
           </BrowserRouter>
         </TooltipProvider>
-        </AuthProvider>
       </SolanaWalletProvider>
     </ThemeProvider>
   </QueryClientProvider>

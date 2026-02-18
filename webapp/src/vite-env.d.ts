@@ -1,9 +1,9 @@
 /// <reference types="vite/client" />
 
-import { Buffer } from "buffer";
+interface ImportMetaEnv {
+  readonly VITE_BACKEND_URL?: string;
+}
 
-declare global {
-  interface Window {
-    Buffer: typeof Buffer;
-  }
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
 }

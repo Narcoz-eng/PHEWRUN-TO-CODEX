@@ -162,7 +162,7 @@
 
   .card-premium::before {
     content: '';
-    @apply absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300 pointer-events-none;
+    @apply absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300;
     background: radial-gradient(
       600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
       hsl(var(--primary) / 0.06),
@@ -275,7 +275,7 @@
 
   .btn-glow::after {
     content: '';
-    @apply absolute inset-0 opacity-0 transition-opacity duration-300 pointer-events-none;
+    @apply absolute inset-0 opacity-0 transition-opacity duration-300;
     background: radial-gradient(
       100% 100% at 50% 50%,
       hsl(var(--primary) / 0.3) 0%,

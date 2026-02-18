@@ -11,14 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { Wallet, Ghost, Sun, Loader2, AlertTriangle } from "lucide-react";
+import { useWalletAuth, type WalletProviderId } from "@/hooks/useWalletAuth";
+import { Wallet, Ghost, Sun, Loader2, CheckCircle2, Shield, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 
-// Wallet provider options
 const WALLET_PROVIDERS = [
   {
     id: "phantom",
     name: "Phantom",
-    description: "Enter Phantom wallet address",
+    description: "Connect Phantom wallet",
     icon: Ghost,
     iconBg: "bg-purple-500/10",
     iconColor: "text-purple-500",
@@ -26,22 +27,22 @@ const WALLET_PROVIDERS = [
   {
     id: "solflare",
     name: "Solflare",
-    description: "Enter Solflare wallet address",
+    description: "Connect Solflare wallet",
     icon: Sun,
     iconBg: "bg-orange-500/10",
     iconColor: "text-orange-500",
   },
   {
     id: "manual",
-    name: "Other Wallet",
-    description: "Enter any wallet address",
+    name: "Manual Entry",
+    description: "Enter address manually (no verification)",
     icon: Wallet,
     iconBg: "bg-muted",
     iconColor: "text-muted-foreground",
   },
 ] as const;
 
-type WalletProviderId = typeof WALLET_PROVIDERS[number]["id"];
+type WalletSelectorProviderId = typeof WALLET_PROVIDERS[number]["id"];
 
 interface WalletSelectorProps {
   open: boolean;
@@ -50,20 +51,9 @@ interface WalletSelectorProps {
   isConnecting: boolean;
 }
 
-// Validate Solana or EVM address format
-function validateWalletAddress(address: string): { valid: boolean; type: "solana" | "evm" | null } {
-  // Solana: Base58, 32-44 chars
+function isSolanaAddress(address: string): boolean {
   const solanaRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-  // EVM: 0x prefix + 40 hex chars
-  const evmRegex = /^0x[a-fA-F0-9]{40}$/;
-
-  if (solanaRegex.test(address)) {
-    return { valid: true, type: "solana" };
-  }
-  if (evmRegex.test(address)) {
-    return { valid: true, type: "evm" };
-  }
-  return { valid: false, type: null };
+  return solanaRegex.test(address);
 }
 
 export function WalletSelector({
@@ -72,59 +62,85 @@ export function WalletSelector({
   onConnect,
   isConnecting,
 }: WalletSelectorProps) {
-  const [selectedProvider, setSelectedProvider] = useState<WalletProviderId | null>(null);
+  const { connectWallet, availableWallets } = useWalletAuth();
+  const [selectedProvider, setSelectedProvider] = useState<WalletSelectorProviderId | null>(null);
   const [walletAddress, setWalletAddress] = useState("");
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<"idle" | "connecting" | "verified" | "failed">("idle");
 
-  // Reset state when dialog opens
   useEffect(() => {
     if (open) {
       setSelectedProvider(null);
       setWalletAddress("");
       setAddressError(null);
+      setIsVerifying(false);
+      setVerificationStatus("idle");
     }
   }, [open]);
 
-  const handleProviderSelect = (providerId: WalletProviderId) => {
+  const handleProviderSelect = async (providerId: WalletSelectorProviderId) => {
     setSelectedProvider(providerId);
     setWalletAddress("");
     setAddressError(null);
-  };
+    setVerificationStatus("idle");
 
-  const handleAddressChange = (value: string) => {
-    setWalletAddress(value.trim());
-    if (value.trim()) {
-      const validation = validateWalletAddress(value.trim());
-      if (!validation.valid) {
-        setAddressError("Invalid wallet address format");
-      } else {
-        setAddressError(null);
-      }
-    } else {
-      setAddressError(null);
-    }
-  };
-
-  const handleConnect = () => {
-    if (!walletAddress || !selectedProvider) return;
-
-    const validation = validateWalletAddress(walletAddress);
-    if (!validation.valid) {
-      setAddressError("Invalid wallet address format");
+    if (providerId === "manual") {
       return;
     }
 
-    onConnect(walletAddress, selectedProvider);
+    setIsVerifying(true);
+    setVerificationStatus("connecting");
+    try {
+      const { address } = await connectWallet(providerId as WalletProviderId);
+      setWalletAddress(address);
+      setVerificationStatus("verified");
+      toast.success("Wallet connected successfully");
+      onConnect(address, providerId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect wallet";
+      setVerificationStatus("failed");
+      toast.error(message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleAddressChange = (value: string) => {
+    const next = value.trim();
+    setWalletAddress(next);
+    if (next.length === 0) {
+      setAddressError(null);
+      return;
+    }
+    if (!isSolanaAddress(next)) {
+      setAddressError("Invalid Solana wallet address format");
+      return;
+    }
+    setAddressError(null);
+  };
+
+  const handleManualConnect = () => {
+    if (!walletAddress) return;
+
+    if (!isSolanaAddress(walletAddress)) {
+      setAddressError("Invalid Solana wallet address format");
+      return;
+    }
+
+    onConnect(walletAddress, "manual");
   };
 
   const handleClose = () => {
     setSelectedProvider(null);
     setWalletAddress("");
     setAddressError(null);
+    setVerificationStatus("idle");
     onOpenChange(false);
   };
 
   const isValid = selectedProvider && walletAddress && !addressError;
+  const isNativeWallet = selectedProvider && selectedProvider !== "manual";
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -135,31 +151,32 @@ export function WalletSelector({
             Connect Wallet
           </DialogTitle>
           <DialogDescription>
-            Select your wallet type and enter your address.
+            Connect your Solana wallet (Phantom or Solflare).
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Provider Selection */}
           <div className="space-y-2">
-            <Label>Select Wallet Type</Label>
+            <Label>Select Connection Method</Label>
             <div className="grid gap-2">
               {WALLET_PROVIDERS.map((provider) => {
                 const Icon = provider.icon;
                 const isSelected = selectedProvider === provider.id;
+                const isInstalled =
+                  provider.id === "manual" ||
+                  (provider.id === "phantom" && availableWallets.phantom) ||
+                  (provider.id === "solflare" && availableWallets.solflare);
                 return (
                   <button
                     key={provider.id}
                     type="button"
                     onClick={() => handleProviderSelect(provider.id)}
-                    disabled={isConnecting}
+                    disabled={!isInstalled || isVerifying || isConnecting}
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-lg border transition-all",
                       "hover:border-primary/50 hover:bg-secondary/50",
                       "disabled:opacity-50 disabled:cursor-not-allowed",
-                      isSelected
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-background"
+                      isSelected ? "border-primary bg-primary/5" : "border-border bg-background"
                     )}
                   >
                     <div
@@ -173,9 +190,14 @@ export function WalletSelector({
                     <div className="flex-1 text-left">
                       <p className="font-medium text-sm">{provider.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {provider.description}
+                        {isInstalled
+                          ? provider.description
+                          : `${provider.name} extension not detected`}
                       </p>
                     </div>
+                    {provider.id !== "manual" && (
+                      <Shield className="h-4 w-4 text-primary" />
+                    )}
                     <div
                       className={cn(
                         "w-4 h-4 rounded-full border-2 transition-colors",
@@ -190,13 +212,42 @@ export function WalletSelector({
             </div>
           </div>
 
-          {/* Address Input (shown when provider selected) */}
-          {selectedProvider && (
+          {isNativeWallet && verificationStatus !== "idle" && (
+            <div className="p-3 rounded-lg border bg-secondary/30 space-y-2 animate-fade-in">
+              <div className="flex items-center gap-2">
+                {verificationStatus === "connecting" && (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    <span className="text-sm">Waiting for wallet approval...</span>
+                  </>
+                )}
+                {verificationStatus === "verified" && (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 text-gain" />
+                    <span className="text-sm text-gain">Wallet connected!</span>
+                  </>
+                )}
+                {verificationStatus === "failed" && (
+                  <>
+                    <AlertTriangle className="h-4 w-4 text-destructive" />
+                    <span className="text-sm text-destructive">Connection failed</span>
+                  </>
+                )}
+              </div>
+              {walletAddress && (
+                <p className="text-xs font-mono text-muted-foreground truncate">
+                  {walletAddress}
+                </p>
+              )}
+            </div>
+          )}
+
+          {selectedProvider === "manual" && (
             <div className="space-y-2 animate-fade-in">
               <Label htmlFor="wallet-address">Wallet Address</Label>
               <Input
                 id="wallet-address"
-                placeholder="Enter your wallet address..."
+                placeholder="Enter your Solana wallet address..."
                 value={walletAddress}
                 onChange={(e) => handleAddressChange(e.target.value)}
                 className={cn(
@@ -209,7 +260,7 @@ export function WalletSelector({
               ) : (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <AlertTriangle className="h-3 w-3" />
-                  Supports Solana and EVM addresses
+                  Manual entry cannot verify ownership
                 </p>
               )}
             </div>
@@ -217,22 +268,24 @@ export function WalletSelector({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={handleClose} disabled={isConnecting}>
+          <Button variant="outline" onClick={handleClose} disabled={isConnecting || isVerifying}>
             Cancel
           </Button>
-          <Button
-            onClick={handleConnect}
-            disabled={!isValid || isConnecting}
-          >
-            {isConnecting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Connecting...
-              </>
-            ) : (
-              "Connect Wallet"
-            )}
-          </Button>
+          {selectedProvider === "manual" && (
+            <Button
+              onClick={handleManualConnect}
+              disabled={!isValid || isConnecting}
+            >
+              {isConnecting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                "Connect (Unverified)"
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

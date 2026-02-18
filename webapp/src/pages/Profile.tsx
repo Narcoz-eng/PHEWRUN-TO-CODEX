@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSession, useAuth } from "@/lib/auth-client";
+import { useSession, usePrivyAuth } from "@/lib/auth-client";
 import { api, ApiError } from "@/lib/api";
 import { User, Post, getAvatarUrl, calculatePercentChange, LIQUIDATION_LEVEL } from "@/types";
 import { LevelBadge, LevelBar } from "@/components/feed/LevelBar";
@@ -51,7 +51,7 @@ export default function Profile() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: session } = useSession();
-  const { signOut } = useAuth();
+  const { logout } = usePrivyAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isEditing, setIsEditing] = useState(false);
