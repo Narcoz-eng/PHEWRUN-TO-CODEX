@@ -36,6 +36,8 @@ model User {
   posts         Post[]
   followers     Follow[]  @relation("Following") // users following this user
   following     Follow[]  @relation("Followers") // users this user follows
+  accounts      Account[]
+  sessions      Session[]
   likes         Like[]
   comments      Comment[]
   reposts       Repost[]
@@ -43,6 +45,58 @@ model User {
   notificationsSent Notification[] @relation("NotificationsFrom") // notifications triggered
   announcements Announcement[] // announcements created by admin
   viewedAnnouncements AnnouncementView[] // track which announcements user has seen
+}
+
+// Better Auth account model
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+// Better Auth session model
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  userId    String
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Better Auth verification model
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@index([expiresAt])
 }
 
 // Follow relationship between users
