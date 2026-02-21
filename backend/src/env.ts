@@ -15,6 +15,10 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().default("file:./dev.db"),
 
+  // Privy
+  PRIVY_APP_ID: z.string().optional().default(""),
+  PRIVY_APP_SECRET: z.string().optional().default(""),
+
   // Google OAuth
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
@@ -39,6 +43,8 @@ const envSchema = z.object({
  */
 function validateProductionConfig(parsed: z.infer<typeof envSchema>): string[] {
   const warnings: string[] = [];
+  const hasPrivyAppId = parsed.PRIVY_APP_ID.length > 0;
+  const hasPrivyAppSecret = parsed.PRIVY_APP_SECRET.length > 0;
   const hasGoogleClientId = parsed.GOOGLE_CLIENT_ID.length > 0;
   const hasGoogleClientSecret = parsed.GOOGLE_CLIENT_SECRET.length > 0;
   const hasAnySmtpField =
@@ -77,6 +83,10 @@ function validateProductionConfig(parsed: z.infer<typeof envSchema>): string[] {
     warnings.push("Google OAuth is partially configured. Set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.");
   }
 
+  if (hasPrivyAppId !== hasPrivyAppSecret) {
+    warnings.push("Privy is partially configured. Set both PRIVY_APP_ID and PRIVY_APP_SECRET.");
+  }
+
   if (hasAnySmtpField && !hasFullSmtpConfig) {
     warnings.push("SMTP is partially configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM.");
   }
@@ -95,6 +105,7 @@ function getSafeConfig(parsed: z.infer<typeof envSchema>): Record<string, string
     DATABASE_URL: parsed.DATABASE_URL.includes("file:")
       ? "SQLite (file-based)"
       : "External database",
+    PRIVY_AUTH: parsed.PRIVY_APP_ID && parsed.PRIVY_APP_SECRET ? "enabled" : "disabled",
     BETTER_AUTH_URL: parsed.BETTER_AUTH_URL || "(uses BACKEND_URL)",
     FRONTEND_URL: parsed.FRONTEND_URL,
     GOOGLE_OAUTH: parsed.GOOGLE_CLIENT_ID && parsed.GOOGLE_CLIENT_SECRET ? "enabled" : "disabled",
@@ -189,3 +200,10 @@ export const hasSmtpConfig =
   env.SMTP_USER.length > 0 &&
   env.SMTP_PASS.length > 0 &&
   env.SMTP_FROM.length > 0;
+
+/**
+ * Whether Privy server auth is configured
+ */
+export const hasPrivyConfig =
+  env.PRIVY_APP_ID.length > 0 &&
+  env.PRIVY_APP_SECRET.length > 0;

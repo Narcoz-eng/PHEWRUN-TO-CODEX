@@ -1,5 +1,6 @@
 import { usePrivy, useLogout } from "@privy-io/react-auth";
 import { useMemo, useState, useEffect } from "react";
+import { api } from "@/lib/api";
 
 // Re-export the raw usePrivy hook for advanced usage
 export { usePrivy } from "@privy-io/react-auth";
@@ -28,7 +29,7 @@ export interface PrivyAuthState {
  */
 export function usePrivyAuth(): PrivyAuthState {
   const { user, authenticated, ready, login } = usePrivy();
-  const { logout } = useLogout();
+  const { logout: privyLogout } = useLogout();
 
   const authUser = useMemo<PrivyAuthUser | null>(() => {
     if (!user) return null;
@@ -37,13 +38,13 @@ export function usePrivyAuth(): PrivyAuthState {
       (account) => account.type === "email"
     );
     const email: string | null =
-      emailAccount && "email" in emailAccount
-        ? String(emailAccount.email ?? "")
+      emailAccount && "address" in emailAccount
+        ? String(emailAccount.address ?? "")
         : null;
 
     let walletAddress: string | null = null;
     for (const account of user.linkedAccounts) {
-      if ("address" in account && account.address) {
+      if (account.type === "wallet" && "address" in account && account.address) {
         walletAddress = String(account.address);
         break;
       }
@@ -52,7 +53,10 @@ export function usePrivyAuth(): PrivyAuthState {
     const linkedAccounts = user.linkedAccounts.map((account) => ({
       type: account.type,
       address: "address" in account ? String(account.address) : undefined,
-      email: "email" in account ? String(account.email) : undefined,
+      email:
+        account.type === "email" && "address" in account
+          ? String(account.address)
+          : undefined,
     }));
 
     return {
@@ -62,6 +66,15 @@ export function usePrivyAuth(): PrivyAuthState {
       linkedAccounts,
     };
   }, [user]);
+
+  const logout = async () => {
+    try {
+      await api.post<{ success: boolean }>("/api/auth/logout");
+    } catch (error) {
+      console.warn("Backend logout failed, continuing with Privy logout:", error);
+    }
+    await privyLogout();
+  };
 
   return {
     user: authUser,

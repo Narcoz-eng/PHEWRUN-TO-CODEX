@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { setCookie } from "hono/cookie";
 import { serveStatic } from "hono/bun";
-import "./env";
+import { hasPrivyConfig } from "./env";
 import {
   betterAuthMiddleware,
   auth,
@@ -17,6 +17,16 @@ import { adminRouter } from "./routes/admin";
 import { notificationsRouter } from "./routes/notifications";
 import { announcementsRouter } from "./routes/announcements";
 import { leaderboardRouter } from "./routes/leaderboard";
+import {
+  getBearerToken,
+  getPrimaryPrivyEmail,
+  getPrimaryPrivyWallet,
+  getPrivyUserById,
+  verifyPrivyAccessToken,
+} from "./lib/privy";
+import { PublicKey } from "@solana/web3.js";
+import nacl from "tweetnacl";
+import bs58 from "bs58";
 
 // Security middleware imports
 import {
@@ -55,6 +65,9 @@ const app = new Hono<{
   Variables: AuthVariables & { requestId?: string; sanitizedBody?: unknown; sanitizedQuery?: Record<string, string[]> };
 }>();
 
+const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const SESSION_COOKIE_NAMES = [`${AUTH_COOKIE_PREFIX}.session_token`, "better-auth.session_token"] as const;
+
 // =====================================================
 // Middleware Stack (order matters!)
 // =====================================================
@@ -64,6 +77,77 @@ app.use("*", requestId());
 
 // 2. Security Headers - protect against common vulnerabilities
 const isProduction = process.env.NODE_ENV === "production";
+
+function getSessionTokenFromCookie(cookieHeader: string | undefined): string | null {
+  if (!cookieHeader) return null;
+
+  const pairs = cookieHeader.split(";").map((part) => part.trim());
+  for (const cookieName of SESSION_COOKIE_NAMES) {
+    const prefix = `${cookieName}=`;
+    const match = pairs.find((pair) => pair.startsWith(prefix));
+    if (match) {
+      return match.slice(prefix.length);
+    }
+  }
+
+  return null;
+}
+
+function setSessionCookies(c: Parameters<typeof setCookie>[0], token: string) {
+  const sameSite = isProduction ? "None" : "Lax";
+  for (const cookieName of SESSION_COOKIE_NAMES) {
+    setCookie(c, cookieName, token, {
+      path: "/",
+      httpOnly: true,
+      sameSite,
+      secure: isProduction,
+      maxAge: SESSION_MAX_AGE_SECONDS,
+    });
+  }
+}
+
+function clearSessionCookies(c: Parameters<typeof setCookie>[0]) {
+  const sameSite = isProduction ? "None" : "Lax";
+  for (const cookieName of SESSION_COOKIE_NAMES) {
+    setCookie(c, cookieName, "", {
+      path: "/",
+      httpOnly: true,
+      sameSite,
+      secure: isProduction,
+      maxAge: 0,
+    });
+  }
+}
+
+async function createSessionForUser(
+  c: Parameters<typeof setCookie>[0],
+  userId: string
+): Promise<string> {
+  const now = new Date();
+  const sessionToken =
+    crypto.randomUUID().replace(/-/g, "") +
+    crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
+
+  await prisma.session.create({
+    data: {
+      id: crypto.randomUUID().replace(/-/g, "").slice(0, 32),
+      token: sessionToken,
+      userId,
+      expiresAt,
+      createdAt: now,
+      updatedAt: now,
+      ipAddress:
+        c.req.header("x-forwarded-for") ||
+        c.req.header("x-real-ip") ||
+        "unknown",
+      userAgent: c.req.header("user-agent") || "unknown",
+    },
+  });
+
+  setSessionCookies(c, sessionToken);
+  return sessionToken;
+}
 app.use(
   "*",
   securityHeaders({
@@ -148,10 +232,6 @@ app.get("/health", (c) => {
 // Wallet Authentication Routes (BEFORE Better Auth to take priority)
 // =====================================================
 
-import { PublicKey } from "@solana/web3.js";
-import nacl from "tweetnacl";
-import bs58 from "bs58";
-
 // Verify Solana wallet signature
 function verifySolanaSignature(
   message: string,
@@ -170,6 +250,211 @@ function verifySolanaSignature(
     return false;
   }
 }
+
+app.post("/api/auth/sync", async (c) => {
+  try {
+    if (!hasPrivyConfig) {
+      return c.json(
+        {
+          error: {
+            message: "Privy server auth is not configured",
+            code: "PRIVY_NOT_CONFIGURED",
+          },
+        },
+        500
+      );
+    }
+
+    const privyToken = getBearerToken(c.req.header("Authorization"));
+    if (!privyToken) {
+      return c.json(
+        {
+          error: {
+            message: "Missing Privy bearer token",
+            code: "UNAUTHORIZED",
+          },
+        },
+        401
+      );
+    }
+
+    const claims = await verifyPrivyAccessToken(privyToken);
+    if (!claims?.userId) {
+      return c.json(
+        {
+          error: {
+            message: "Invalid Privy token",
+            code: "UNAUTHORIZED",
+          },
+        },
+        401
+      );
+    }
+
+    const now = new Date();
+    const privyUser = await getPrivyUserById(claims.userId);
+    const privyEmail = getPrimaryPrivyEmail(privyUser);
+    const privyWallet = getPrimaryPrivyWallet(privyUser);
+
+    let user = await prisma.user.findFirst({
+      where: {
+        accounts: {
+          some: {
+            providerId: "privy",
+            accountId: claims.userId,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      user = await prisma.user.findUnique({
+        where: { id: claims.userId },
+      });
+    }
+
+    if (!user && privyWallet) {
+      user = await prisma.user.findFirst({
+        where: { walletAddress: privyWallet },
+      });
+    }
+
+    if (!user && privyEmail) {
+      user = await prisma.user.findUnique({
+        where: { email: privyEmail },
+      });
+    }
+
+    if (!user) {
+      const fallbackEmail = `${crypto
+        .randomUUID()
+        .replace(/-/g, "")}@privy.local`;
+      const nameFromEmail = privyEmail?.split("@")[0];
+      const defaultName = nameFromEmail
+        ? nameFromEmail
+        : privyWallet
+          ? `${privyWallet.slice(0, 6)}...${privyWallet.slice(-4)}`
+          : `user_${claims.userId.slice(-6)}`;
+
+      user = await prisma.user.create({
+        data: {
+          id: claims.userId,
+          email: privyEmail || fallbackEmail,
+          name: defaultName,
+          emailVerified: !!privyEmail,
+          walletAddress: privyWallet || null,
+          walletProvider: privyWallet ? "privy" : null,
+          walletConnectedAt: privyWallet ? now : null,
+          level: 0,
+          xp: 0,
+          isAdmin: false,
+          isBanned: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    } else {
+      const updateData: {
+        email?: string;
+        emailVerified?: boolean;
+        walletAddress?: string;
+        walletProvider?: string;
+        walletConnectedAt?: Date;
+        updatedAt?: Date;
+      } = {};
+
+      if (privyEmail && user.email !== privyEmail) {
+        const emailOwner = await prisma.user.findUnique({
+          where: { email: privyEmail },
+          select: { id: true },
+        });
+        if (!emailOwner || emailOwner.id === user.id) {
+          updateData.email = privyEmail;
+          updateData.emailVerified = true;
+        }
+      }
+
+      if (privyWallet && user.walletAddress !== privyWallet) {
+        const walletOwner = await prisma.user.findFirst({
+          where: { walletAddress: privyWallet },
+          select: { id: true },
+        });
+        if (!walletOwner || walletOwner.id === user.id) {
+          updateData.walletAddress = privyWallet;
+          updateData.walletProvider = "privy";
+          updateData.walletConnectedAt = now;
+        }
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        updateData.updatedAt = now;
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: updateData,
+        });
+      }
+    }
+
+    const existingPrivyAccount = await prisma.account.findUnique({
+      where: {
+        providerId_accountId: {
+          providerId: "privy",
+          accountId: claims.userId,
+        },
+      },
+    });
+
+    if (!existingPrivyAccount) {
+      await prisma.account.create({
+        data: {
+          id: crypto.randomUUID().replace(/-/g, "").slice(0, 32),
+          accountId: claims.userId,
+          providerId: "privy",
+          userId: user.id,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    } else if (existingPrivyAccount.userId !== user.id) {
+      await prisma.account.update({
+        where: { id: existingPrivyAccount.id },
+        data: {
+          userId: user.id,
+          updatedAt: now,
+        },
+      });
+    }
+
+    const sessionToken = await createSessionForUser(c, user.id);
+
+    return c.json({
+      data: {
+        token: sessionToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image,
+          walletAddress: user.walletAddress,
+          walletProvider: user.walletProvider,
+          level: user.level,
+          xp: user.xp,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Privy sync error:", error);
+    return c.json(
+      {
+        error: {
+          message: "Failed to sync authenticated user",
+          code: "INTERNAL_ERROR",
+        },
+      },
+      500
+    );
+  }
+});
 
 // Sign up / Sign in with wallet address
 // This creates a user account using wallet address as identifier
@@ -263,43 +548,7 @@ app.post("/api/auth/wallet", async (c) => {
       });
     }
 
-    // Create session
-    const sessionToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-    await prisma.session.create({
-      data: {
-        id: crypto.randomUUID().replace(/-/g, "").slice(0, 32),
-        token: sessionToken,
-        userId: user.id,
-        expiresAt,
-        createdAt: now,
-        updatedAt: now,
-        ipAddress: c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown",
-        userAgent: c.req.header("user-agent") || "unknown",
-      },
-    });
-
-    // Set session cookies (auth prefix + legacy fallback for compatibility)
-    const isProduction = process.env.NODE_ENV === "production";
-    const sameSite = isProduction ? "None" : "Lax";
-    const maxAge = 7 * 24 * 60 * 60;
-
-    setCookie(c, `${AUTH_COOKIE_PREFIX}.session_token`, sessionToken, {
-      path: "/",
-      httpOnly: true,
-      sameSite,
-      secure: isProduction,
-      maxAge,
-    });
-
-    setCookie(c, "better-auth.session_token", sessionToken, {
-      path: "/",
-      httpOnly: true,
-      sameSite,
-      secure: isProduction,
-      maxAge,
-    });
+    const sessionToken = await createSessionForUser(c, user.id);
 
     return c.json({
       token: sessionToken,
@@ -318,6 +567,29 @@ app.post("/api/auth/wallet", async (c) => {
     console.error("Wallet auth error:", error);
     return c.json(
       { error: { message: "Failed to authenticate with wallet", code: "INTERNAL_ERROR" } },
+      500
+    );
+  }
+});
+
+app.post("/api/auth/logout", async (c) => {
+  try {
+    const sessionToken =
+      getSessionTokenFromCookie(c.req.header("Cookie")) ||
+      getBearerToken(c.req.header("Authorization"));
+
+    if (sessionToken) {
+      await prisma.session.deleteMany({
+        where: { token: sessionToken },
+      });
+    }
+
+    clearSessionCookies(c);
+    return c.json({ data: { success: true } });
+  } catch (error) {
+    console.error("Logout error:", error);
+    return c.json(
+      { error: { message: "Failed to log out", code: "INTERNAL_ERROR" } },
       500
     );
   }

@@ -1,5 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { auth } from "../lib/auth";
+import { getBearerToken, verifyPrivyAccessToken } from "../lib/privy";
 import { prisma } from "../prisma";
 
 const SESSION_COOKIE_NAMES = ["auth.session_token", "better-auth.session_token"] as const;
@@ -100,9 +101,8 @@ export const betterAuthMiddleware = createMiddleware<{ Variables: AuthVariables 
 
       // If no cookie session, try Bearer token
       if (!session?.user) {
-        const authHeader = c.req.header("Authorization");
-        if (authHeader?.startsWith("Bearer ")) {
-          const token = authHeader.slice(7);
+        const token = getBearerToken(c.req.header("Authorization"));
+        if (token) {
           // Look up session by token
           const dbSession = await prisma.session.findFirst({
             where: {
@@ -125,6 +125,48 @@ export const betterAuthMiddleware = createMiddleware<{ Variables: AuthVariables 
               },
               user: dbSession.user as AuthUser,
             } as Awaited<ReturnType<typeof auth.api.getSession>>;
+          } else {
+            // Fallback: Accept Privy access tokens and map them to a local user.
+            const claims = await verifyPrivyAccessToken(token);
+            if (claims?.userId) {
+              const dbUser = await prisma.user.findFirst({
+                where: {
+                  OR: [
+                    { id: claims.userId },
+                    {
+                      accounts: {
+                        some: {
+                          providerId: "privy",
+                          accountId: claims.userId,
+                        },
+                      },
+                    },
+                  ],
+                },
+              });
+
+              if (dbUser) {
+                const expiresAt = claims.expiration
+                  ? new Date(claims.expiration * 1000)
+                  : new Date(Date.now() + 60 * 60 * 1000);
+
+                const issuedAt = claims.issuedAt
+                  ? new Date(claims.issuedAt * 1000)
+                  : new Date();
+
+                session = {
+                  session: {
+                    id: claims.sessionId || `privy_${claims.userId}`,
+                    userId: dbUser.id,
+                    token,
+                    expiresAt,
+                    createdAt: issuedAt,
+                    updatedAt: issuedAt,
+                  },
+                  user: dbUser as AuthUser,
+                } as Awaited<ReturnType<typeof auth.api.getSession>>;
+              }
+            }
           }
         }
       }
