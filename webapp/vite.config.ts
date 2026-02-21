@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import { vibecodePlugin } from "@vibecodeapp/webapp/plugin";
 import path from "path";
 
